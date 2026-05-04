@@ -3,14 +3,15 @@
 import { useState } from "react";
 import {
   LayoutDashboard,
+  UserRoundCheck,
   FolderKanban,
-  CalendarDays,
   Settings,
-  HelpCircle,
+  CircleUserRound,
   LogOut,
   Menu,
   X,
   User,
+  BriefcaseBusiness,
 } from "lucide-react";
 
 import LogoutButton from "./Logout";
@@ -19,13 +20,14 @@ import { useAuth } from "../context/AuthContext";
 
 const navItems = [
   { label: "Dashboard", href: "#", icon: LayoutDashboard },
-  { label: "Projects", href: "#", icon: FolderKanban },
-  { label: "Calendar", href: "#", icon: CalendarDays },
+  { label: "Hire Talent", href: "#", icon: UserRoundCheck },
+  { label: "Open Jobs", href: "#", icon: FolderKanban },
+  { label: "Work History", href: "#", icon: BriefcaseBusiness },
   { label: "Settings", href: "#", icon: Settings },
-  { label: "Help", href: "#", icon: HelpCircle },
+  { label: "Profile", href: "#", icon: CircleUserRound },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ activePage, setActivePage }) {
   const [isOpen, setIsOpen] = useState(true);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
@@ -95,23 +97,29 @@ export default function Sidebar() {
   </button>
 </div>
 
-        <nav className="flex-1 space-y-2 px-3 py-5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
+      <nav className="flex-1 space-y-2 px-3 py-5">
+        {navItems.map((item) => {
+          const Icon = item.icon;
 
-            return (
-              <a
-                key={item.label}
-                href={item.href}
-                className={`group flex items-center rounded-xl px-3 py-3 text-sm font-medium text-white/80 transition hover:bg-white hover:text-black
-                ${isOpen ? "justify-start gap-3" : "justify-center"}`}
-              >
-                <Icon size={22} className="shrink-0" />
-                {isOpen && <span>{item.label}</span>}
-              </a>
-            );
-          })}
-        </nav>
+          return (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => setActivePage(item.label)}
+              className={`flex w-full items-center rounded-xl px-3 py-3 text-sm font-medium transition-all duration-300
+              ${
+                activePage === item.label
+                  ? "bg-white text-black"
+                  : "text-white/80 hover:bg-white hover:text-black"
+              }
+              ${isOpen ? "justify-start gap-3" : "justify-center"}`}
+            >
+              <Icon size={22} className="shrink-0" />
+              {isOpen && <span>{item.label}</span>}
+            </button>
+          );
+        })}
+      </nav>
 
         <div className="border-t border-white/10 p-3">
           <div
