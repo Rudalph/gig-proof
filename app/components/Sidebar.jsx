@@ -15,8 +15,6 @@ import {
 
 import LogoutButton from "./Logout";
 
-// Change this import path to match your project structure
-// Example: import { useAuth } from "@/app/context/AuthContext";
 import { useAuth } from "../context/AuthContext";
 
 const navItems = [
@@ -41,15 +39,6 @@ export default function Sidebar() {
     const userEmail = user?.email || "No email available";
     const userPhoto = user?.photoURL;
 
-  const handleLogout = async () => {
-    try {
-      if (logout) {
-        await logout();
-      }
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
-  };
 
   return (
     <>
@@ -76,32 +65,35 @@ export default function Sidebar() {
         ${isOpen ? "w-72" : "w-20"}
         ${isMobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
       >
-        <div className="flex h-16 items-center justify-between border-b border-white/10 px-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-black">
-              <LayoutDashboard size={22} />
-            </div>
-            {isOpen && <span className="text-lg font-semibold">Gig Proof</span>}
-          </div>
+        <div className="flex h-16 items-center justify-between border-b border-white/10 px-4 transition-all duration-300 ease-in-out">
+  <div className="flex min-w-0 items-center gap-3 transition-all duration-300 ease-in-out">
+    {isOpen && (
+      <span className="whitespace-nowrap text-lg font-semibold opacity-100 transition-all duration-300 ease-in-out">
+        Gig Proof
+      </span>
+    )}
+  </div>
 
-          <button
-            type="button"
-            onClick={() => setIsOpen((value) => !value)}
-            className="hidden rounded-lg p-2 text-white/70 transition hover:bg-white hover:text-black md:inline-flex"
-            aria-label={isOpen ? "Collapse sidebar" : "Expand sidebar"}
-          >
-            {isOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
+  <button
+    type="button"
+    onClick={() => setIsOpen((value) => !value)}
+    className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white/70 transition-all duration-300 ease-in-out hover:bg-white hover:text-black md:flex"
+    aria-label={isOpen ? "Collapse sidebar" : "Expand sidebar"}
+  >
+    <span className="transition-transform duration-300 ease-in-out">
+      {isOpen ? <X size={20} /> : <Menu size={20} />}
+    </span>
+  </button>
 
-          <button
-            type="button"
-            onClick={() => setIsMobileOpen(false)}
-            className="rounded-lg p-2 text-white/70 transition hover:bg-white hover:text-black md:hidden"
-            aria-label="Close sidebar"
-          >
-            <X size={20} />
-          </button>
-        </div>
+  <button
+    type="button"
+    onClick={() => setIsMobileOpen(false)}
+    className="rounded-lg p-2 text-white/70 transition-all duration-300 ease-in-out hover:bg-white hover:text-black md:hidden"
+    aria-label="Close sidebar"
+  >
+    <X size={20} />
+  </button>
+</div>
 
         <nav className="flex-1 space-y-2 px-3 py-5">
           {navItems.map((item) => {
@@ -147,17 +139,17 @@ export default function Sidebar() {
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={handleLogout}
-            className={`flex w-full items-center rounded-xl px-3 py-3 text-sm font-medium text-white/80 transition hover:bg-white hover:text-black
-            ${isOpen ? "justify-start gap-3" : "justify-center"}`}
-          >
-            <LogOut size={22} className="shrink-0" />
-            {isOpen && <span><LogoutButton /></span>}
-          </button>
+          <div
+  className={`flex w-full items-center rounded-xl px-3 py-3 text-sm font-medium text-white/80 transition hover:bg-white hover:text-black
+  ${isOpen ? "justify-start gap-3" : "justify-center"}`}
+>
+  <LogOut size={22} className="shrink-0" />
+  {isOpen && <LogoutButton />}
+</div>
+
         </div>
       </aside>
     </>
   );
 }
+
