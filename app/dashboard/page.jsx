@@ -8,6 +8,7 @@ import { useAuth } from "../context/AuthContext";
 
 import AddProjects from "../components/AddProjects";
 import Profile from "../components/Profile";
+import Settings from "../components/settings/Settings";
 
 
 export default function Dashboard() {
@@ -31,7 +32,7 @@ export default function Dashboard() {
         {activePage === "Dashboard" && <h1>Dashboard Page</h1>}
         {activePage === "Hire Talent" && <AddProjects />}
         {activePage === "Calendar" && <h1>Calendar Page</h1>}
-        {activePage === "Settings" && <h1>Settings Page</h1>}
+        {activePage === "Settings" && <Settings />}
         {activePage === "Profile" && <Profile />}
       </main>
     </div>

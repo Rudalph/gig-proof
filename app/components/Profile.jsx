@@ -185,7 +185,7 @@ export default function Profile() {
               className="w-full rounded-2xl border border-black/10 px-4 py-3 outline-none focus:border-black resize-none"
             />
           ) : (
-            <p className="min-h-[100px] rounded-2xl bg-black/5 px-4 py-3 text-black/80">
+            <p className="min-h-25 rounded-2xl bg-black/5 px-4 py-3 text-black/80">
               {profile.bio || "No bio added yet."}
             </p>
           )}
@@ -212,7 +212,7 @@ function ProfileField({ label, name, value, isEditing, onChange }) {
           className="w-full rounded-2xl border border-black/10 px-4 py-3 outline-none focus:border-black"
         />
       ) : (
-        <p className="rounded-2xl bg-black/5 px-4 py-3 text-black/80 min-h-[48px]">
+        <p className="rounded-2xl bg-black/5 px-4 py-3 text-black/80 min-h-12">
           {value || "Not added"}
         </p>
       )}
