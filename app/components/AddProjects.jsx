@@ -88,10 +88,17 @@ export default function AddProjects() {
         { merge: true }
       );
 
-      await addDoc(
+      // Add to user's subcollection and get the auto-generated ID
+      const subcollectionRef = await addDoc(
         collection(db, "users", user.uid, "projectsAdded"),
         projectData
       );
+
+      // Mirror to top-level projects collection using the same ID
+      await setDoc(doc(db, "projects", subcollectionRef.id), {
+        ...projectData,
+        subcollectionId: subcollectionRef.id,
+      });
 
       e.target.reset();
       handleClose();

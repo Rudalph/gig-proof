@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import AddProjects from "../components/AddProjects";
 import Profile from "../components/Profile";
 import Settings from "../components/settings/Settings";
+import OpenJobs from "../components/OpenJobs";
 
 
 export default function Dashboard() {
@@ -31,6 +32,7 @@ export default function Dashboard() {
       <main className="ml-20 p-8 md:ml-72">
         {activePage === "Dashboard" && <h1>Dashboard Page</h1>}
         {activePage === "Hire Talent" && <AddProjects />}
+        {activePage === "Open Jobs" && <OpenJobs />}
         {activePage === "Calendar" && <h1>Calendar Page</h1>}
         {activePage === "Settings" && <Settings />}
         {activePage === "Profile" && <Profile />}

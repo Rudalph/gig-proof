@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, orderBy, query, doc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
-import { X, Pencil, Trash2 } from "lucide-react";
+import { X, Pencil, Trash2, Search } from "lucide-react";
 
 const DESCRIPTION_WORD_LIMIT = 100;
 const REQUIREMENTS_WORD_LIMIT = 150;
@@ -34,6 +34,53 @@ function generateCode() {
   return Math.random().toString(36).substring(2, 7).toUpperCase();
 }
 
+function scoreProject(project, q) {
+  if (!q.trim()) return 1;
+  const query = q.toLowerCase();
+  let score = 0;
+  if (project.title?.toLowerCase().includes(query)) score += 3;
+  if ((project.tags || []).some((t) => t.toLowerCase().includes(query))) score += 2;
+  if (project.category?.toLowerCase().includes(query)) score += 1;
+  if (project.description?.toLowerCase().includes(query)) score += 0.5;
+  return score;
+}
+
+function toggleSet(setter, value) {
+  setter((prev) => {
+    const next = new Set(prev);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    return next;
+  });
+}
+
+function FilterGroup({ label, options, selected, onToggle, onClear }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="shrink-0 text-xs font-medium text-black/50">{label}</label>
+      <button
+        onClick={onClear}
+        className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+          selected.size === 0 ? "bg-black text-white" : "bg-black/5 text-black hover:bg-black/10"
+        }`}
+      >
+        All
+      </button>
+      {options.map((opt) => (
+        <button
+          key={opt}
+          onClick={() => onToggle(opt)}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+            selected.has(opt) ? "bg-black text-white" : "bg-black/5 text-black hover:bg-black/10"
+          }`}
+        >
+          {opt}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const CATEGORIES = ["Web Development", "Mobile App", "UI/UX Design", "Writing", "Marketing", "Other"];
 const EXPERIENCE_LEVELS = ["Beginner", "Intermediate", "Expert"];
 const CURRENCIES = ["USDC", "SOL", "USD", "EUR", "INR"];
@@ -43,8 +90,9 @@ export default function UserAddedProjects() {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
 
-  const [filterCategory, setFilterCategory] = useState("All");
-  const [filterTag, setFilterTag] = useState("All");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState(new Set());
+  const [selectedTags, setSelectedTags] = useState(new Set());
 
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({});
@@ -77,14 +125,18 @@ export default function UserAddedProjects() {
 
   if (!user) return null;
 
-  const allCategories = ["All", ...new Set(projects.map((p) => p.category).filter(Boolean))];
-  const allTags = ["All", ...new Set(projects.flatMap((p) => p.tags || []))];
+  const allCategories = [...new Set(projects.map((p) => p.category).filter(Boolean))];
+  const allTags = [...new Set(projects.flatMap((p) => p.tags || []))];
 
-  const filtered = projects.filter((p) => {
-    const categoryMatch = filterCategory === "All" || p.category === filterCategory;
-    const tagMatch = filterTag === "All" || (p.tags || []).includes(filterTag);
-    return categoryMatch && tagMatch;
-  });
+  const filtered = projects
+    .map((p) => ({ ...p, _score: scoreProject(p, searchQuery) }))
+    .filter((p) => {
+      if (searchQuery.trim() && p._score === 0) return false;
+      if (selectedCategories.size > 0 && !selectedCategories.has(p.category)) return false;
+      if (selectedTags.size > 0 && !(p.tags || []).some((t) => selectedTags.has(t))) return false;
+      return true;
+    })
+    .sort((a, b) => b._score - a._score);
 
   const openEdit = () => {
     setEditData({
@@ -152,8 +204,7 @@ export default function UserAddedProjects() {
 
     setSaving(true);
     try {
-      const ref = doc(db, "users", user.uid, "projectsAdded", selectedProject.id);
-      await updateDoc(ref, {
+      const updatedFields = {
         description: editData.description,
         budget: editData.budget,
         currency: editData.currency,
@@ -163,7 +214,11 @@ export default function UserAddedProjects() {
         tags: parseTags(editData.tags),
         requirements: editData.requirements,
         updatedAt: serverTimestamp(),
-      });
+      };
+
+      await updateDoc(doc(db, "users", user.uid, "projectsAdded", selectedProject.id), updatedFields);
+      await updateDoc(doc(db, "projects", selectedProject.id), updatedFields);
+
       setIsEditing(false);
       setEditErrors({});
     } catch (error) {
@@ -180,6 +235,7 @@ export default function UserAddedProjects() {
     setDeleting(true);
     try {
       await deleteDoc(doc(db, "users", user.uid, "projectsAdded", selectedProject.id));
+      await deleteDoc(doc(db, "projects", selectedProject.id));
       closeModal();
     } catch (error) {
       console.error("Error deleting project:", error);
@@ -195,49 +251,53 @@ export default function UserAddedProjects() {
     <div className="mt-8">
       <h2 className="mb-4 text-xl font-semibold">Your Projects</h2>
 
+      {/* Search */}
       {projects.length > 0 && (
-        <div className="mb-5 flex flex-wrap gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-black/50">Category</label>
-            <div className="flex flex-wrap gap-1">
-              {allCategories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setFilterCategory(cat)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                    filterCategory === cat ? "bg-black text-white" : "bg-black/5 text-black hover:bg-black/10"
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="relative mb-4">
+          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-black/30" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search your projects..."
+            className="w-full rounded-xl border border-black/20 py-3 pl-10 pr-10 text-sm outline-none focus:border-black"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-black/30 hover:text-black"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
 
-          {allTags.length > 1 && (
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-black/50">Tag</label>
-              <div className="flex flex-wrap gap-1">
-                {allTags.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => setFilterTag(tag)}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                      filterTag === tag ? "bg-black text-white" : "bg-black/5 text-black hover:bg-black/10"
-                    }`}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            </div>
+      {/* Filters */}
+      {projects.length > 0 && (
+        <div className="mb-5 space-y-3">
+          <FilterGroup
+            label="Category"
+            options={allCategories}
+            selected={selectedCategories}
+            onToggle={(v) => toggleSet(setSelectedCategories, v)}
+            onClear={() => setSelectedCategories(new Set())}
+          />
+          {allTags.length > 0 && (
+            <FilterGroup
+              label="Tags"
+              options={allTags}
+              selected={selectedTags}
+              onToggle={(v) => toggleSet(setSelectedTags, v)}
+              onClear={() => setSelectedTags(new Set())}
+            />
           )}
         </div>
       )}
 
       {filtered.length === 0 ? (
         <div className="rounded-2xl border border-black/10 p-6 text-center text-black/60">
-          {projects.length === 0 ? "No projects added yet." : "No projects match the selected filters."}
+          {projects.length === 0 ? "No projects added yet." : "No projects match your search or filters."}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
