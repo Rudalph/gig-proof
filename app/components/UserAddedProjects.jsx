@@ -5,6 +5,7 @@ import { collection, onSnapshot, orderBy, query, doc, updateDoc, deleteDoc, serv
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { X, Pencil, Trash2, Search } from "lucide-react";
+import { useCurrency, formatBudget } from "../context/CurrencyContext";
 
 const DESCRIPTION_WORD_LIMIT = 100;
 const REQUIREMENTS_WORD_LIMIT = 150;
@@ -87,6 +88,7 @@ const CURRENCIES = ["USDC", "SOL", "USD", "EUR", "INR"];
 
 export default function UserAddedProjects() {
   const { user } = useAuth();
+  const { defaultCurrency, rates } = useCurrency();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
 
@@ -327,7 +329,7 @@ export default function UserAddedProjects() {
               <div className="space-y-1 text-sm text-black/70">
                 <p>
                   <span className="font-medium text-black">Budget:</span>{" "}
-                  {project.budget ? `${project.budget} ${project.currency || ""}` : "Not specified"}
+                  {formatBudget(project.budget, project.currency, defaultCurrency, rates)}
                 </p>
                 <p>
                   <span className="font-medium text-black">Category:</span> {project.category}
@@ -500,7 +502,7 @@ export default function UserAddedProjects() {
                   <div className="rounded-2xl bg-black/5 px-4 py-3">
                     <p className="text-xs text-black/40">Budget</p>
                     <p className="mt-1 font-semibold">
-                      {selectedProject.budget ? `${selectedProject.budget} ${selectedProject.currency || ""}` : "Not specified"}
+                      {formatBudget(selectedProject.budget, selectedProject.currency, defaultCurrency, rates)}
                     </p>
                   </div>
 
