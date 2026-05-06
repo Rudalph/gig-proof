@@ -1,6 +1,7 @@
 import { Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "../app/context/AuthContext";
+import { CurrencyProvider } from "../app/context/CurrencyContext";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -18,7 +19,9 @@ export default function RootLayout({ children }) {
     <html lang="en" className={spaceGrotesk.className}>
       <body className="min-h-screen flex flex-col">
         <AuthProvider>
-        {children}
+          <CurrencyProvider>
+            {children}
+          </CurrencyProvider>
         </AuthProvider>
       </body>
     </html>

@@ -5,6 +5,7 @@ import { collection, onSnapshot, orderBy, query, doc, updateDoc, arrayUnion, arr
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { X, Search, Bookmark, BookmarkCheck, Mail } from "lucide-react";
+import { useCurrency, formatBudget } from "../context/CurrencyContext";
 
 function formatDate(dateStr) {
   if (!dateStr) return "Not specified";
@@ -67,6 +68,7 @@ function FilterGroup({ label, options, selected, onToggle, onClear }) {
 
 export default function OpenJobs() {
   const { user } = useAuth();
+  const { defaultCurrency, rates } = useCurrency();
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState(null);
@@ -274,7 +276,7 @@ export default function OpenJobs() {
                 <div className="space-y-1 text-sm text-black/70">
                   <p>
                     <span className="font-medium text-black">Budget:</span>{" "}
-                    {job.budget ? `${job.budget} ${job.currency || ""}` : "Not specified"}
+                    {formatBudget(job.budget, job.currency, defaultCurrency, rates)}
                   </p>
                   <p><span className="font-medium text-black">Category:</span> {job.category}</p>
                   <p><span className="font-medium text-black">Level:</span> {job.experienceLevel}</p>
@@ -330,7 +332,7 @@ export default function OpenJobs() {
                 <div className="rounded-2xl bg-black/5 px-4 py-3">
                   <p className="text-xs text-black/40">Budget</p>
                   <p className="mt-1 font-semibold">
-                    {selectedJob.budget ? `${selectedJob.budget} ${selectedJob.currency || ""}` : "Not specified"}
+                    {formatBudget(selectedJob.budget, selectedJob.currency, defaultCurrency, rates)}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-black/5 px-4 py-3">
