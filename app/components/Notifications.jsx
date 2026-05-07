@@ -7,6 +7,9 @@ import {
 } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
+import { buildCreateEscrowTx } from "@/app/lib/escrow";
 import {
   Bell, Check, X, Mail, Briefcase, CheckCircle2, XCircle, User, MapPin,
 } from "lucide-react";
@@ -24,6 +27,8 @@ function timeAgo(ts) {
 
 export default function Notifications() {
   const { user } = useAuth();
+  const { publicKey, sendTransaction } = useWallet();
+  const { connection } = useConnection();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("inbox");
@@ -69,10 +74,39 @@ export default function Notifications() {
   const handleApprove = async (notif) => {
     setProcessing(notif.id);
     try {
-      await updateDoc(doc(db, "notifications", notif.id), {
-        status: "approved",
-        read: true,
-      });
+      let escrowTx = null;
+
+      // Attempt to lock USDC in escrow if both wallets are connected
+      if (publicKey) {
+        try {
+          const [freelancerSnap, projectSnap] = await Promise.all([
+            getDoc(doc(db, "users", notif.fromUid)),
+            getDoc(doc(db, "projects", notif.projectId)),
+          ]);
+          const freelancerWallet = freelancerSnap.data()?.walletAddress;
+          const budget = projectSnap.data()?.budget;
+
+          if (freelancerWallet && budget) {
+            const freelancerKey = new PublicKey(freelancerWallet);
+            const amountUsdc = Math.round(Number(budget) * 1_000_000);
+            const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, amountUsdc);
+            const sig = await sendTransaction(tx, connection);
+            await connection.confirmTransaction(sig, "confirmed");
+            escrowTx = sig;
+
+            // Persist escrow info to the project documents
+            const escrowData = { escrowCreated: true, escrowTx: sig, approvedFreelancerWallet: freelancerWallet, approvedFreelancerUid: notif.fromUid };
+            await Promise.all([
+              updateDoc(doc(db, "projects", notif.projectId), escrowData),
+              updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
+            ]);
+          }
+        } catch (escrowErr) {
+          console.warn("Escrow skipped:", escrowErr.message);
+        }
+      }
+
+      await updateDoc(doc(db, "notifications", notif.id), { status: "approved", read: true });
       await addDoc(collection(db, "notifications"), {
         type: "request_approved",
         toUid: notif.fromUid,
@@ -84,6 +118,7 @@ export default function Notifications() {
         status: "approved",
         read: false,
         createdAt: serverTimestamp(),
+        ...(escrowTx ? { escrowTx } : {}),
       });
     } catch (e) {
       console.error("Approve error:", e);
