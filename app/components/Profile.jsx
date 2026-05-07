@@ -5,8 +5,9 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { PROFESSIONS, COUNTRIES } from "../lib/professions";
-import { Search, X, Check, Copy } from "lucide-react";
+import { Search, X, Check, Copy, Wallet } from "lucide-react";
 import { useToast } from "../context/ToastContext";
+import { useWallet } from "@solana/wallet-adapter-react";
 
 const EXPERIENCE_OPTIONS = ["Beginner", "Intermediate", "Expert"];
 const AVAILABILITY_OPTIONS = ["Full-time", "Part-time", "Project-based"];
@@ -32,6 +33,7 @@ function computeCompletion(profile) {
 export default function Profile() {
   const { user } = useAuth();
   const toast = useToast();
+  const { connected, publicKey, connect, disconnect, connecting } = useWallet();
 
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -89,6 +91,14 @@ export default function Profile() {
     };
     fetchProfile();
   }, [user]);
+
+  useEffect(() => {
+    if (connected && publicKey && user) {
+      const address = publicKey.toString();
+      setProfile((prev) => ({ ...prev, walletAddress: address }));
+      setDoc(doc(db, "users", user.uid), { walletAddress: address }, { merge: true }).catch(() => {});
+    }
+  }, [connected, publicKey, user]);
 
   const handleChange = (e) => {
     setProfile({ ...profile, [e.target.name]: e.target.value });
@@ -237,31 +247,36 @@ export default function Profile() {
 
           <ProfileField label="Skills" name="skills" value={profile.skills} isEditing={isEditing} onChange={handleChange} />
           {/* Wallet Address — hidden in view mode */}
-          <div>
-            <label className="block text-sm font-medium text-black/70 mb-2">Wallet Address</label>
-            {isEditing ? (
-              <input
-                type="text"
-                name="walletAddress"
-                value={profile.walletAddress}
-                onChange={handleChange}
-                placeholder="Enter wallet address"
-                className="w-full rounded-2xl border border-black/10 bg-white text-black px-4 py-3 outline-none focus:border-black"
-              />
-            ) : (
-              <div className="flex items-center gap-2 rounded-2xl bg-black/5 px-4 py-3 min-h-12 overflow-hidden">
-                <span className="flex-1 min-w-0 font-mono text-sm text-black/50 tracking-wider truncate">
-                  {profile.walletAddress ? "••••••••••••••••" : "Not added"}
-                </span>
-                {profile.walletAddress && (
-                  <button
-                    onClick={() => setWalletModalOpen(true)}
-                    className="shrink-0 rounded-lg bg-black px-3 py-1.5 text-xs font-medium text-white transition hover:bg-black/80"
-                  >
-                    View
-                  </button>
-                )}
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-black/70 mb-2">Solana Wallet</label>
+            {connected && publicKey ? (
+              <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-emerald-600 mb-0.5">Connected</p>
+                  <p className="font-mono text-sm text-black/60 truncate">{publicKey.toString()}</p>
+                </div>
+                <button
+                  onClick={() => setWalletModalOpen(true)}
+                  className="shrink-0 rounded-lg bg-black px-3 py-1.5 text-xs font-medium text-white transition hover:bg-black/80"
+                >
+                  View
+                </button>
+                <button
+                  onClick={() => disconnect()}
+                  className="shrink-0 rounded-lg border border-black/15 px-3 py-1.5 text-xs font-medium text-black/60 transition hover:border-red-300 hover:text-red-500"
+                >
+                  Disconnect
+                </button>
               </div>
+            ) : (
+              <button
+                onClick={() => connect().catch(() => {})}
+                disabled={connecting}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-black transition hover:border-black hover:bg-black hover:text-white disabled:opacity-50"
+              >
+                <Wallet size={16} />
+                {connecting ? "Connecting..." : "Connect Phantom Wallet"}
+              </button>
             )}
           </div>
         </div>
