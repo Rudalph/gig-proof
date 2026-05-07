@@ -163,6 +163,12 @@ export default function AddProjects() {
                     {descWords} / {DESCRIPTION_WORD_LIMIT} words
                   </span>
                 </div>
+                <div className="mb-2 h-1 w-full rounded-full bg-black/8">
+                  <div
+                    className={`h-1 rounded-full transition-all duration-200 ${descWords > DESCRIPTION_WORD_LIMIT ? "bg-red-500" : "bg-black/40"}`}
+                    style={{ width: `${Math.min((descWords / DESCRIPTION_WORD_LIMIT) * 100, 100)}%` }}
+                  />
+                </div>
                 <textarea
                   name="description"
                   required
@@ -295,6 +301,12 @@ export default function AddProjects() {
                   <span className={`text-xs ${reqWords > REQUIREMENTS_WORD_LIMIT ? "text-red-500 font-semibold" : "text-black/40"}`}>
                     {reqWords} / {REQUIREMENTS_WORD_LIMIT} words
                   </span>
+                </div>
+                <div className="mb-2 h-1 w-full rounded-full bg-black/8">
+                  <div
+                    className={`h-1 rounded-full transition-all duration-200 ${reqWords > REQUIREMENTS_WORD_LIMIT ? "bg-red-500" : "bg-black/40"}`}
+                    style={{ width: `${Math.min((reqWords / REQUIREMENTS_WORD_LIMIT) * 100, 100)}%` }}
+                  />
                 </div>
                 <textarea
                   name="requirements"

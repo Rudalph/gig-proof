@@ -6,6 +6,8 @@ import {
   onSnapshot,
   orderBy,
   query,
+  updateDoc,
+  doc,
 } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
@@ -44,14 +46,15 @@ function formatDate(dateStr) {
   return `${d}${suffix} ${monthName} ${year}`;
 }
 
-function formatTimestamp(ts) {
+function timeAgo(ts) {
   if (!ts) return "";
   const date = ts.toDate ? ts.toDate() : new Date(ts);
-  return date.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 const STATUS_CONFIG = {
@@ -109,8 +112,23 @@ function StatusBadge({ status }) {
   );
 }
 
-function ProjectRow({ project, defaultCurrency, rates }) {
+function ProjectRow({ project, defaultCurrency, rates, userId }) {
   const [expanded, setExpanded] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+
+  const handleStatusChange = async (newStatus) => {
+    if (!userId || project.status === newStatus) return;
+    setStatusUpdating(true);
+    try {
+      const fields = { status: newStatus };
+      await updateDoc(doc(db, "users", userId, "projectsAdded", project.id), fields);
+      await updateDoc(doc(db, "projects", project.id), fields);
+    } catch (e) {
+      console.error("Status update error:", e);
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
 
   return (
     <div className="rounded-2xl border border-black/8 bg-white transition-all duration-200 hover:border-black/15 hover:shadow-sm">
@@ -139,7 +157,7 @@ function ProjectRow({ project, defaultCurrency, rates }) {
             {project.createdAt && (
               <span className="flex items-center gap-1">
                 <Clock size={11} />
-                Posted {formatTimestamp(project.createdAt)}
+                Posted {timeAgo(project.createdAt)}
               </span>
             )}
           </div>
@@ -215,6 +233,26 @@ function ProjectRow({ project, defaultCurrency, rates }) {
               </div>
             </div>
           )}
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/35">Update Status</p>
+            <div className="flex flex-wrap gap-2">
+              {["open", "in-progress", "completed", "closed"].map((s) => (
+                <button
+                  key={s}
+                  onClick={(e) => { e.stopPropagation(); handleStatusChange(s); }}
+                  disabled={statusUpdating || project.status === s}
+                  className={`rounded-full px-4 py-1.5 text-xs font-medium transition capitalize ${
+                    project.status === s
+                      ? "bg-black text-white"
+                      : "bg-black/5 text-black hover:bg-black/10"
+                  } disabled:opacity-40`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -329,6 +367,7 @@ export default function WorkHistory() {
                   project={project}
                   defaultCurrency={defaultCurrency}
                   rates={rates}
+                  userId={user.uid}
                 />
               ))}
             </div>
