@@ -614,6 +614,18 @@ export default function OpenJobs() {
                 </div>
               )}
 
+              {selectedJob.currency === "USDC" ? (
+                <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2.5">
+                  <span className="text-emerald-700 text-xs font-semibold">Crypto payment</span>
+                  <span className="text-emerald-600 text-xs">— You will be paid in USDC, secured by a Solana smart contract escrow. Funds are locked on approval and released when work is complete.</span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 px-4 py-2.5">
+                  <span className="text-amber-700 text-xs font-semibold shrink-0">Fiat payment</span>
+                  <span className="text-amber-600 text-xs">— No crypto will be used. Payment is arranged directly between client and freelancer via third-party applications. GigProof is not responsible for fiat transactions.</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                 <div className="rounded-2xl bg-black/5 px-4 py-3">
                   <p className="text-xs text-black/40">Budget</p>
