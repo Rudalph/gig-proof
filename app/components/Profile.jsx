@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
-import { useCurrency, DISPLAY_CURRENCIES } from "../context/CurrencyContext";
 import { PROFESSIONS, COUNTRIES } from "../lib/professions";
 import { Search, X, Check, Copy } from "lucide-react";
 import { useToast } from "../context/ToastContext";
@@ -25,24 +24,13 @@ function computeCompletion(profile) {
     !!profile.experienceLevel,
     !!profile.availability,
     !!profile.workType,
-    !!profile.hourlyRate,
     !!profile.walletAddress?.trim(),
   ];
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 }
 
-function toEur(amount, currency, rates) {
-  const num = parseFloat(amount);
-  if (!amount || isNaN(num) || num === 0) return null;
-  if (currency === "EUR") return null; // already EUR, no need to show conversion
-  const rate = rates[currency];
-  if (!rate) return null;
-  return (num / rate).toFixed(2);
-}
-
 export default function Profile() {
   const { user } = useAuth();
-  const { rates } = useCurrency();
   const toast = useToast();
 
   const [isEditing, setIsEditing] = useState(false);
@@ -66,8 +54,6 @@ export default function Profile() {
     experienceLevel: "",
     availability: "",
     workType: "",
-    hourlyRate: "",
-    hourlyRateCurrency: "EUR",
   });
 
   useEffect(() => {
@@ -91,8 +77,6 @@ export default function Profile() {
             experienceLevel: d.experienceLevel || "",
             availability: d.availability || "",
             workType: d.workType || "",
-            hourlyRate: d.hourlyRate || "",
-            hourlyRateCurrency: d.hourlyRateCurrency || "EUR",
           });
         } else {
           setProfile((prev) => ({ ...prev, email: user.email || "" }));
@@ -146,8 +130,6 @@ export default function Profile() {
     p.toLowerCase().includes(professionSearch.toLowerCase())
   );
 
-  const eurEquivalent = toEur(profile.hourlyRate, profile.hourlyRateCurrency, rates);
-  const hourlyRateSymbol = DISPLAY_CURRENCIES.find((c) => c.code === profile.hourlyRateCurrency)?.symbol || "";
 
   const locationDisplay = [profile.city, profile.country].filter(Boolean).join(", ") || "Not added";
 
@@ -494,53 +476,6 @@ export default function Profile() {
             )}
           </div>
 
-          {/* Hourly Rate with currency + EUR conversion */}
-          <div>
-            <label className="block text-sm font-medium text-black/70 mb-2">Hourly Rate</label>
-            {isEditing ? (
-              <div>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    name="hourlyRate"
-                    value={profile.hourlyRate}
-                    onChange={handleChange}
-                    placeholder="e.g. 50"
-                    className="flex-1 rounded-2xl border border-black/10 px-4 py-3 outline-none focus:border-black"
-                  />
-                  <select
-                    name="hourlyRateCurrency"
-                    value={profile.hourlyRateCurrency}
-                    onChange={handleChange}
-                    className="rounded-2xl border border-black/10 bg-white text-black px-3 py-3 outline-none focus:border-black text-sm min-w-[90px]"
-                  >
-                    {DISPLAY_CURRENCIES.map(({ code, symbol }) => (
-                      <option key={code} value={code}>{symbol} {code}</option>
-                    ))}
-                  </select>
-                </div>
-                {eurEquivalent && (
-                  <p className="mt-2 text-sm text-black/50">
-                    ≈ <span className="font-medium text-black">€{eurEquivalent}</span> / hr
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="rounded-2xl bg-black/5 px-4 py-3 text-black/80">
-                {profile.hourlyRate ? (
-                  <>
-                    {hourlyRateSymbol}{profile.hourlyRate} {profile.hourlyRateCurrency}/hr
-                    {eurEquivalent && (
-                      <span className="text-black/50"> (€{eurEquivalent})</span>
-                    )}
-                  </>
-                ) : (
-                  "Not set"
-                )}
-              </p>
-            )}
-          </div>
 
         </div>
       </div>

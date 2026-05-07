@@ -3,12 +3,19 @@
 import { useEffect, useState } from "react";
 import {
   collection, onSnapshot, orderBy, query,
-  doc, updateDoc, arrayUnion, arrayRemove, getDoc,
+  doc, updateDoc, arrayUnion, arrayRemove, getDoc, getDocs,
+  addDoc, serverTimestamp, where, increment,
 } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, formatBudget } from "../context/CurrencyContext";
-import { X, Search, Bookmark, BookmarkCheck, Mail, ChevronDown, ChevronUp } from "lucide-react";
+import { X, Search, Bookmark, BookmarkCheck, ChevronDown, ChevronUp, Send, Mail, CheckCircle2 } from "lucide-react";
+
+const MESSAGE_WORD_LIMIT = 100;
+
+function countWords(text) {
+  return text.trim() === "" ? 0 : text.trim().split(/\s+/).length;
+}
 
 function formatDate(dateStr) {
   if (!dateStr) return "Not specified";
@@ -19,6 +26,15 @@ function formatDate(dateStr) {
     day % 10 === 3 && day !== 13 ? "rd" : "th";
   const monthName = new Date(year, month - 1, 1).toLocaleString("default", { month: "long" });
   return `${day}${suffix} ${monthName}, ${year}`;
+}
+
+function formatTime(timeStr) {
+  if (!timeStr) return "";
+  const [hourStr, minStr] = timeStr.split(":");
+  let h = parseInt(hourStr, 10);
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${minStr} ${ampm}`;
 }
 
 function toBudgetEur(budget, currency, rates) {
@@ -110,8 +126,10 @@ const SORT_OPTIONS = [
   { value: "suggested", label: "Suggested for you" },
   { value: "budget_asc", label: "Budget (low → high)" },
   { value: "budget_desc", label: "Budget (high → low)" },
-  { value: "deadline_asc", label: "Deadline (nearest)" },
-  { value: "deadline_desc", label: "Deadline (farthest)" },
+  { value: "end_date_asc", label: "End date (nearest)" },
+  { value: "end_date_desc", label: "End date (farthest)" },
+  { value: "duration_asc", label: "Duration (shortest)" },
+  { value: "duration_desc", label: "Duration (longest)" },
 ];
 
 export default function OpenJobs() {
@@ -133,6 +151,13 @@ export default function OpenJobs() {
   const [selectedLevels, setSelectedLevels] = useState(new Set());
   const [showOwnJobs, setShowOwnJobs] = useState(true);
   const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(false);
+  const [contactedJobs, setContactedJobs] = useState(new Set());
+  const [declinedJobs, setDeclinedJobs] = useState(new Map());
+  const [approvedJobs, setApprovedJobs] = useState(new Map());
+  const [, setTick] = useState(0);
+  const [contactModalJob, setContactModalJob] = useState(null);
+  const [contactMessage, setContactMessage] = useState("");
+  const [contactSending, setContactSending] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt", "desc"));
@@ -153,34 +178,142 @@ export default function OpenJobs() {
       if (snap.exists()) {
         const d = snap.data();
         setBookmarks(d.bookmarks || []);
+        setContactedJobs(new Set(d.contactedJobs || []));
+
+        const declinesSnap = await getDocs(query(
+          collection(db, "notifications"),
+          where("toUid", "==", user.uid),
+          where("type", "==", "request_declined")
+        ));
+        const declineMap = new Map();
+        declinesSnap.forEach((d) => {
+          const nd = d.data();
+          const declinedAt = nd.createdAt?.toDate?.() || new Date(0);
+          declineMap.set(nd.projectId, declinedAt);
+        });
+        setDeclinedJobs(declineMap);
+
         setUserProfile({
           professions: d.professions || [],
           skills: d.skills || "",
           experienceLevel: d.experienceLevel || "",
+          bio: d.bio || "",
+          availability: d.availability || "",
+          workType: d.workType || "",
+          primaryRole: d.primaryRole || "",
+          role: d.role || "",
+          city: d.city || "",
+          country: d.country || "",
         });
       }
     };
     fetchUserData();
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, "notifications"),
+      where("toUid", "==", user.uid),
+      where("type", "==", "request_approved")
+    );
+    return onSnapshot(q, (snap) => {
+      const m = new Map();
+      snap.forEach((d) => { const nd = d.data(); m.set(nd.projectId, nd.fromEmail); });
+      setApprovedJobs(m);
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (declinedJobs.size === 0) return;
+    const id = setInterval(() => setTick((t) => t + 1), 60000);
+    return () => clearInterval(id);
+  }, [declinedJobs.size]);
+
   const isBookmarked = (jobId) => bookmarks.includes(jobId);
+
+  const handleViewJob = (job) => {
+    setSelectedJob(job);
+    if (job.ownerId !== user?.uid) {
+      updateDoc(doc(db, "projects", job.id), { viewCount: increment(1) }).catch(() => {});
+    }
+  };
 
   const handleBookmark = async (job) => {
     if (!user) return;
     setBookmarking(true);
     const userRef = doc(db, "users", user.uid);
+    const wasBookmarked = isBookmarked(job.id);
     try {
-      if (isBookmarked(job.id)) {
+      if (wasBookmarked) {
         await updateDoc(userRef, { bookmarks: arrayRemove(job.id) });
         setBookmarks((prev) => prev.filter((id) => id !== job.id));
       } else {
         await updateDoc(userRef, { bookmarks: arrayUnion(job.id) });
         setBookmarks((prev) => [...prev, job.id]);
       }
+      if (job.ownerId !== user.uid) {
+        updateDoc(doc(db, "projects", job.id), {
+          bookmarkCount: increment(wasBookmarked ? -1 : 1),
+        }).catch(() => {});
+      }
     } catch (error) {
       console.error("Bookmark error:", error);
     } finally {
       setBookmarking(false);
+    }
+  };
+
+  const COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
+  const getCooldownRemaining = (projectId) => {
+    const declinedAt = declinedJobs.get(projectId);
+    if (!declinedAt) return null;
+    const remaining = COOLDOWN_MS - (Date.now() - declinedAt.getTime());
+    if (remaining <= 0) return null;
+    const hours = Math.floor(remaining / (60 * 60 * 1000));
+    const mins = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  };
+
+  const handleContactSubmit = async () => {
+    if (!user || !contactModalJob || !contactMessage.trim()) return;
+    setContactSending(true);
+    try {
+      await addDoc(collection(db, "notifications"), {
+        type: "contact_request",
+        toUid: contactModalJob.ownerId,
+        fromUid: user.uid,
+        fromEmail: user.email,
+        fromName: user.displayName || user.email?.split("@")[0] || "User",
+        projectId: contactModalJob.id,
+        projectTitle: contactModalJob.title,
+        message: contactMessage.trim(),
+        status: "pending",
+        read: false,
+        createdAt: serverTimestamp(),
+        senderProfile: {
+          bio: userProfile?.bio || "",
+          professions: userProfile?.professions || [],
+          skills: userProfile?.skills || "",
+          experienceLevel: userProfile?.experienceLevel || "",
+          availability: userProfile?.availability || "",
+          workType: userProfile?.workType || "",
+          primaryRole: userProfile?.primaryRole || "",
+          role: userProfile?.role || "",
+          city: userProfile?.city || "",
+          country: userProfile?.country || "",
+        },
+      });
+      await updateDoc(doc(db, "users", user.uid), { contactedJobs: arrayUnion(contactModalJob.id) });
+      setContactedJobs((prev) => new Set([...prev, contactModalJob.id]));
+      setDeclinedJobs((prev) => { const next = new Map(prev); next.delete(contactModalJob.id); return next; });
+      setContactModalJob(null);
+      setContactMessage("");
+    } catch (error) {
+      console.error("Contact error:", error);
+    } finally {
+      setContactSending(false);
     }
   };
 
@@ -219,14 +352,34 @@ export default function OpenJobs() {
           return toBudgetEur(a.budget, a.currency, rates) - toBudgetEur(b.budget, b.currency, rates);
         case "budget_desc":
           return toBudgetEur(b.budget, b.currency, rates) - toBudgetEur(a.budget, a.currency, rates);
-        case "deadline_asc":
-          if (!a.deadline) return 1;
-          if (!b.deadline) return -1;
-          return a.deadline.localeCompare(b.deadline);
-        case "deadline_desc":
-          if (!a.deadline) return 1;
-          if (!b.deadline) return -1;
-          return b.deadline.localeCompare(a.deadline);
+        case "end_date_asc": {
+          const ad = a.endDate || a.deadline || "";
+          const bd = b.endDate || b.deadline || "";
+          if (!ad) return 1;
+          if (!bd) return -1;
+          return ad.localeCompare(bd);
+        }
+        case "end_date_desc": {
+          const ad = a.endDate || a.deadline || "";
+          const bd = b.endDate || b.deadline || "";
+          if (!ad) return 1;
+          if (!bd) return -1;
+          return bd.localeCompare(ad);
+        }
+        case "duration_asc": {
+          const ad = a.durationDays ?? (a.isSameDay ? 0 : null);
+          const bd = b.durationDays ?? (b.isSameDay ? 0 : null);
+          if (ad === null) return 1;
+          if (bd === null) return -1;
+          return ad - bd;
+        }
+        case "duration_desc": {
+          const ad = a.durationDays ?? (a.isSameDay ? 0 : null);
+          const bd = b.durationDays ?? (b.isSameDay ? 0 : null);
+          if (ad === null) return 1;
+          if (bd === null) return -1;
+          return bd - ad;
+        }
         default:
           return 0;
       }
@@ -370,7 +523,7 @@ export default function OpenJobs() {
             return (
               <div
                 key={job.id}
-                onClick={() => setSelectedJob(job)}
+                onClick={() => handleViewJob(job)}
                 className={`relative cursor-pointer rounded-2xl p-5 shadow-sm transition hover:shadow-md overflow-hidden ${
                   isOwn
                     ? "border-2 border-black/20 bg-gray-50 hover:border-black/40"
@@ -468,10 +621,52 @@ export default function OpenJobs() {
                     {formatBudget(selectedJob.budget, selectedJob.currency, defaultCurrency, rates)}
                   </p>
                 </div>
-                <div className="rounded-2xl bg-black/5 px-4 py-3">
-                  <p className="text-xs text-black/40">Deadline</p>
-                  <p className="mt-1 font-semibold">{formatDate(selectedJob.deadline)}</p>
-                </div>
+
+                {selectedJob.isSameDay ? (
+                  <>
+                    <div className="rounded-2xl bg-black/5 px-4 py-3">
+                      <p className="text-xs text-black/40">Date</p>
+                      <p className="mt-1 font-semibold">{formatDate(selectedJob.startDate || selectedJob.deadline)}</p>
+                    </div>
+                    {selectedJob.startTime && selectedJob.endTime && (
+                      <div className="rounded-2xl bg-black/5 px-4 py-3">
+                        <p className="text-xs text-black/40">Time</p>
+                        <p className="mt-1 font-semibold">{formatTime(selectedJob.startTime)} – {formatTime(selectedJob.endTime)}</p>
+                      </div>
+                    )}
+                  </>
+                ) : selectedJob.durationDays > 0 ? (
+                  <>
+                    <div className="rounded-2xl bg-black/5 px-4 py-3">
+                      <p className="text-xs text-black/40">Start Date</p>
+                      <p className="mt-1 font-semibold">{formatDate(selectedJob.startDate)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-black/5 px-4 py-3">
+                      <p className="text-xs text-black/40">End Date</p>
+                      <p className="mt-1 font-semibold">{formatDate(selectedJob.endDate || selectedJob.deadline)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-black/5 px-4 py-3">
+                      <p className="text-xs text-black/40">Duration</p>
+                      <p className="mt-1 font-semibold">
+                        {selectedJob.durationDays} day{selectedJob.durationDays !== 1 ? "s" : ""}
+                      </p>
+                    </div>
+                    {(selectedJob.startTime || selectedJob.endTime) && (
+                      <div className="rounded-2xl bg-black/5 px-4 py-3">
+                        <p className="text-xs text-black/40">Time</p>
+                        <p className="mt-1 font-semibold">
+                          {formatTime(selectedJob.startTime) || "—"} – {formatTime(selectedJob.endTime) || "—"}
+                        </p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="rounded-2xl bg-black/5 px-4 py-3">
+                    <p className="text-xs text-black/40">Deadline</p>
+                    <p className="mt-1 font-semibold">{formatDate(selectedJob.deadline)}</p>
+                  </div>
+                )}
+
                 <div className="rounded-2xl bg-black/5 px-4 py-3">
                   <p className="text-xs text-black/40">Experience</p>
                   <p className="mt-1 font-semibold">{selectedJob.experienceLevel || "Any"}</p>
@@ -483,7 +678,9 @@ export default function OpenJobs() {
                 <div className="rounded-2xl bg-black/5 px-4 py-3">
                   <p className="text-xs text-black/40">Posted by</p>
                   <p className="mt-1 font-semibold truncate">
-                    {selectedJob.ownerId === user?.uid ? "You" : selectedJob.ownerEmail || "Unknown"}
+                    {selectedJob.ownerId === user?.uid
+                      ? "You"
+                      : selectedJob.ownerName || selectedJob.ownerEmail?.split("@")[0] || "Unknown"}
                   </p>
                 </div>
               </div>
@@ -501,15 +698,40 @@ export default function OpenJobs() {
 
               {selectedJob.ownerId !== user?.uid && (
                 <div className="flex gap-3 pt-2 border-t border-black/10">
-                  <a
-                    href={`mailto:${selectedJob.ownerEmail}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-black/80"
-                  >
-                    <Mail size={16} />
-                    Contact Publisher
-                  </a>
+                  {(() => {
+                    const publisherEmail = approvedJobs.get(selectedJob.id);
+                    if (publisherEmail) {
+                      return (
+                        <div className="flex flex-1 flex-col gap-2">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+                            <CheckCircle2 size={13} />
+                            Request accepted — you can now contact the publisher
+                          </div>
+                          <a
+                            href={`mailto:${publisherEmail}`}
+                            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-medium text-white transition hover:bg-emerald-600"
+                          >
+                            <Mail size={16} />
+                            Contact Publisher
+                          </a>
+                        </div>
+                      );
+                    }
+                    const cooldown = getCooldownRemaining(selectedJob.id);
+                    const isPending = contactedJobs.has(selectedJob.id) && !declinedJobs.has(selectedJob.id);
+                    const isDisabled = isPending || !!cooldown;
+                    const label = cooldown ? `Try again in ${cooldown}` : isPending ? "Request Sent" : "Contact Publisher";
+                    return (
+                      <button
+                        onClick={() => { setContactModalJob(selectedJob); setContactMessage(""); }}
+                        disabled={isDisabled}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-black/80 disabled:opacity-60 disabled:cursor-default"
+                      >
+                        <Send size={16} />
+                        {label}
+                      </button>
+                    );
+                  })()}
                   <button
                     onClick={() => handleBookmark(selectedJob)}
                     disabled={bookmarking}
@@ -524,6 +746,88 @@ export default function OpenJobs() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contact form modal */}
+      {contactModalJob && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setContactModalJob(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white text-black shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-black/10 p-5">
+              <h2 className="text-lg font-semibold">Contact Publisher</h2>
+              <button
+                onClick={() => setContactModalJob(null)}
+                className="rounded-full p-2 transition hover:bg-black hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="rounded-xl bg-black/4 px-4 py-3">
+                <p className="text-xs text-black/40 mb-0.5">Regarding</p>
+                <p className="text-sm font-semibold text-black">{contactModalJob.title}</p>
+              </div>
+              {(() => {
+                const msgWords = countWords(contactMessage);
+                const msgOver = msgWords > MESSAGE_WORD_LIMIT;
+                return (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="mb-1 flex items-center justify-between">
+                        <label className="text-sm font-medium text-black/70">
+                          Your Message <span className="text-red-500">*</span>
+                        </label>
+                        <span className={`text-xs ${msgOver ? "text-red-500 font-semibold" : "text-black/40"}`}>
+                          {msgWords} / {MESSAGE_WORD_LIMIT} words
+                        </span>
+                      </div>
+                      <div className="mb-2 h-1 w-full rounded-full bg-black/8">
+                        <div
+                          className={`h-1 rounded-full transition-all duration-200 ${msgOver ? "bg-red-500" : "bg-black/40"}`}
+                          style={{ width: `${Math.min((msgWords / MESSAGE_WORD_LIMIT) * 100, 100)}%` }}
+                        />
+                      </div>
+                      <textarea
+                        rows="4"
+                        value={contactMessage}
+                        onChange={(e) => setContactMessage(e.target.value)}
+                        placeholder="Introduce yourself and explain why you're a good fit..."
+                        className={`w-full rounded-xl border bg-white text-black px-4 py-3 text-sm outline-none resize-none transition ${
+                          msgOver ? "border-red-400 focus:border-red-500" : "border-black/20 focus:border-black"
+                        }`}
+                      />
+                      {msgOver && (
+                        <p className="mt-1 text-xs text-red-500">
+                          {msgWords - MESSAGE_WORD_LIMIT} word{msgWords - MESSAGE_WORD_LIMIT > 1 ? "s" : ""} over the limit
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setContactModalJob(null)}
+                        className="flex-1 rounded-xl border border-black/20 px-4 py-2.5 text-sm font-medium transition hover:bg-black/5"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleContactSubmit}
+                        disabled={contactSending || !contactMessage.trim() || msgOver}
+                        className="flex-1 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80 disabled:opacity-50"
+                      >
+                        {contactSending ? "Sending..." : "Send Request"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

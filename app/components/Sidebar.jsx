@@ -12,12 +12,13 @@ import {
   X,
   User,
   BriefcaseBusiness,
+  Bell,
 } from "lucide-react";
 
 import LogoutButton from "./Logout";
 
 import { useAuth } from "../context/AuthContext";
-import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+import { collection, query, orderBy, limit, onSnapshot, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 const navItems = [
@@ -25,6 +26,7 @@ const navItems = [
   { label: "Hire Talent", href: "#", icon: UserRoundCheck },
   { label: "Open Jobs", href: "#", icon: FolderKanban },
   { label: "Work History", href: "#", icon: BriefcaseBusiness },
+  { label: "Notifications", href: "#", icon: Bell },
   { label: "Settings", href: "#", icon: Settings },
   { label: "Profile", href: "#", icon: CircleUserRound },
 ];
@@ -35,6 +37,13 @@ export default function Sidebar({ activePage, setActivePage }) {
 
   const { user } = useAuth();
   const [hasNewJobs, setHasNewJobs] = useState(false);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, "notifications"), where("toUid", "==", user.uid), where("read", "==", false));
+    return onSnapshot(q, (snap) => setUnreadNotifs(snap.size));
+  }, [user]);
 
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(1));
@@ -140,6 +149,11 @@ export default function Sidebar({ activePage, setActivePage }) {
                 <Icon size={22} />
                 {item.label === "Open Jobs" && hasNewJobs && activePage !== "Open Jobs" && (
                   <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500" />
+                )}
+                {item.label === "Notifications" && unreadNotifs > 0 && activePage !== "Notifications" && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
+                    {unreadNotifs > 9 ? "9+" : unreadNotifs}
+                  </span>
                 )}
               </div>
               {isOpen && <span>{item.label}</span>}

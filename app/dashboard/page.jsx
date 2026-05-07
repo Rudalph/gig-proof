@@ -13,6 +13,7 @@ import Settings from "../components/settings/Settings";
 import OpenJobs from "../components/OpenJobs";
 import DashboardHome from "../components/DashboardHome";
 import WorkHistory from "../components/WorkHistory";
+import Notifications from "../components/Notifications";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -54,6 +55,7 @@ export default function Dashboard() {
         {activePage === "Hire Talent" && <AddProjects />}
         {activePage === "Open Jobs" && <OpenJobs />}
         {activePage === "Work History" && <WorkHistory />}
+        {activePage === "Notifications" && <Notifications />}
         {activePage === "Settings" && <Settings />}
         {activePage === "Profile" && <Profile />}
       </main>

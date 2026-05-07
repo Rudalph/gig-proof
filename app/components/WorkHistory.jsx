@@ -46,6 +46,15 @@ function formatDate(dateStr) {
   return `${d}${suffix} ${monthName} ${year}`;
 }
 
+function formatTime(timeStr) {
+  if (!timeStr) return "";
+  const [hourStr, minStr] = timeStr.split(":");
+  let h = parseInt(hourStr, 10);
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${minStr} ${ampm}`;
+}
+
 function timeAgo(ts) {
   if (!ts) return "";
   const date = ts.toDate ? ts.toDate() : new Date(ts);
@@ -148,12 +157,26 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
                 {project.category}
               </span>
             )}
-            {project.deadline && (
+            {project.isSameDay && project.startDate ? (
+              <span className="flex items-center gap-1">
+                <CalendarDays size={11} />
+                {formatDate(project.startDate)}
+                {project.startTime && project.endTime
+                  ? ` · ${formatTime(project.startTime)} – ${formatTime(project.endTime)}`
+                  : ""}
+              </span>
+            ) : project.durationDays > 0 ? (
+              <span className="flex items-center gap-1">
+                <CalendarDays size={11} />
+                {project.durationDays} day{project.durationDays !== 1 ? "s" : ""}
+                {project.endDate ? ` · due ${formatDate(project.endDate)}` : ""}
+              </span>
+            ) : project.deadline ? (
               <span className="flex items-center gap-1">
                 <CalendarDays size={11} />
                 Due {formatDate(project.deadline)}
               </span>
-            )}
+            ) : null}
             {project.createdAt && (
               <span className="flex items-center gap-1">
                 <Clock size={11} />

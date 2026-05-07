@@ -17,7 +17,7 @@ function countWords(text) {
 }
 
 function parseTags(value) {
-  return value.split(",").map((t) => t.trim()).filter(Boolean);
+  return [...new Set(value.split(",").map((t) => t.trim()).filter(Boolean))];
 }
 
 function formatDate(dateStr) {
@@ -30,6 +30,15 @@ function formatDate(dateStr) {
     d % 10 === 3 && d !== 13 ? "rd" : "th";
   const monthName = new Date(year, month - 1, 1).toLocaleString("default", { month: "long" });
   return `${d}${suffix} ${monthName}, ${year}`;
+}
+
+function formatTime(timeStr) {
+  if (!timeStr) return "";
+  const [hourStr, minStr] = timeStr.split(":");
+  let h = parseInt(hourStr, 10);
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${minStr} ${ampm}`;
 }
 
 function generateCode() {
@@ -83,8 +92,8 @@ function FilterGroup({ label, options, selected, onToggle, onClear }) {
   );
 }
 
-const EXPERIENCE_LEVELS = ["Beginner", "Intermediate", "Expert"];
-const CURRENCIES = ["USDC", "SOL", "USD", "EUR", "INR"];
+const EXPERIENCE_LEVELS = ["Any", "Beginner", "Intermediate", "Expert"];
+const CURRENCIES = ["USDC", "SOL", "ETH", "BTC", "USD", "EUR", "GBP", "INR", "AUD", "CAD", "JPY", "SGD", "AED", "CHF", "BRL", "NGN"];
 
 export default function UserAddedProjects() {
   const { user } = useAuth();
@@ -148,7 +157,10 @@ export default function UserAddedProjects() {
       description: selectedProject.description || "",
       budget: selectedProject.budget || "",
       currency: selectedProject.currency || "USDC",
-      deadline: selectedProject.deadline || "",
+      startDate: selectedProject.startDate || "",
+      endDate: selectedProject.endDate || selectedProject.deadline || "",
+      startTime: selectedProject.startTime || "",
+      endTime: selectedProject.endTime || "",
       category: selectedProject.category || PROFESSIONS[0],
       experienceLevel: selectedProject.experienceLevel || EXPERIENCE_LEVELS[0],
       tags: (selectedProject.tags || []).join(", "),
@@ -191,10 +203,8 @@ export default function UserAddedProjects() {
       errors.tags = `Maximum ${TAGS_LIMIT} tags allowed`;
     }
 
-    if (editData.deadline && selectedProject.deadline) {
-      if (editData.deadline < selectedProject.deadline) {
-        errors.deadline = "Deadline can only be extended, not moved earlier";
-      }
+    if (editData.startDate && editData.endDate && editData.endDate < editData.startDate) {
+      errors.endDate = "End date must be on or after start date";
     }
 
     return errors;
@@ -209,11 +219,23 @@ export default function UserAddedProjects() {
 
     setSaving(true);
     try {
+      const isSameDay = !!(editData.startDate && editData.endDate && editData.startDate === editData.endDate);
+      const durationDays =
+        editData.startDate && editData.endDate && !isSameDay && new Date(editData.endDate) > new Date(editData.startDate)
+          ? Math.ceil((new Date(editData.endDate) - new Date(editData.startDate)) / 86400000)
+          : 0;
+
       const updatedFields = {
         description: editData.description,
         budget: editData.budget,
         currency: editData.currency,
-        deadline: editData.deadline,
+        startDate: editData.startDate || null,
+        endDate: editData.endDate || null,
+        startTime: editData.startTime || null,
+        endTime: editData.endTime || null,
+        isSameDay,
+        durationDays,
+        deadline: editData.endDate || null,
         category: editData.category,
         experienceLevel: editData.experienceLevel,
         tags: parseTags(editData.tags),
@@ -478,43 +500,73 @@ export default function UserAddedProjects() {
                 )}
               </div>
 
-              {/* Budget / Currency / Deadline */}
+              {/* Budget / Currency / Duration */}
               {isEditing ? (
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="mb-1 block text-xs text-black/40">Budget</label>
-                    <input
-                      type="number"
-                      value={editData.budget}
-                      onChange={(e) => field("budget", e.target.value)}
-                      className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
-                    />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-black/40">Budget</label>
+                      <input
+                        type="number"
+                        value={editData.budget}
+                        onChange={(e) => field("budget", e.target.value)}
+                        className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-black/40">Currency</label>
+                      <select
+                        value={editData.currency}
+                        onChange={(e) => field("currency", e.target.value)}
+                        className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
+                      >
+                        {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
+                      </select>
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs text-black/40">Currency</label>
-                    <select
-                      value={editData.currency}
-                      onChange={(e) => field("currency", e.target.value)}
-                      className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
-                    >
-                      {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
-                    </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-black/40">Start date</label>
+                      <input
+                        type="date"
+                        value={editData.startDate}
+                        onChange={(e) => field("startDate", e.target.value)}
+                        className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-black/40">End date</label>
+                      <input
+                        type="date"
+                        value={editData.endDate}
+                        onChange={(e) => field("endDate", e.target.value)}
+                        min={editData.startDate || undefined}
+                        className={`w-full rounded-xl border px-3 py-2 text-sm outline-none transition bg-white text-black ${
+                          editErrors.endDate ? "border-red-400 focus:border-red-500" : "border-black/20 focus:border-black"
+                        }`}
+                      />
+                      {editErrors.endDate && <p className="mt-1 text-xs text-red-500">{editErrors.endDate}</p>}
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs text-black/40">
-                      Deadline <span className="text-black/30">(can only extend)</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={editData.deadline}
-                      onChange={(e) => field("deadline", e.target.value)}
-                      className={`w-full rounded-xl border px-3 py-2 text-sm outline-none transition ${
-                        editErrors.deadline ? "border-red-400 focus:border-red-500" : "border-black/20 focus:border-black"
-                      }`}
-                    />
-                    {editErrors.deadline && <p className="mt-1 text-xs text-red-500">{editErrors.deadline}</p>}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-black/40">Start time <span className="text-black/25">(optional)</span></label>
+                      <input
+                        type="time"
+                        value={editData.startTime}
+                        onChange={(e) => field("startTime", e.target.value)}
+                        className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-black/40">End time <span className="text-black/25">(optional)</span></label>
+                      <input
+                        type="time"
+                        value={editData.endTime}
+                        onChange={(e) => field("endTime", e.target.value)}
+                        className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
+                      />
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -525,10 +577,17 @@ export default function UserAddedProjects() {
                       {formatBudget(selectedProject.budget, selectedProject.currency, defaultCurrency, rates)}
                     </p>
                   </div>
-
                   <div className="rounded-2xl bg-black/5 px-4 py-3">
-                    <p className="text-xs text-black/40">Deadline</p>
-                    <p className="mt-1 font-semibold">{formatDate(selectedProject.deadline)}</p>
+                    <p className="text-xs text-black/40">Duration</p>
+                    <p className="mt-1 font-semibold">
+                      {selectedProject.isSameDay
+                        ? selectedProject.startTime && selectedProject.endTime
+                          ? `${formatTime(selectedProject.startTime)} – ${formatTime(selectedProject.endTime)}`
+                          : formatDate(selectedProject.startDate || selectedProject.deadline)
+                        : selectedProject.durationDays > 0
+                        ? `${selectedProject.durationDays} day${selectedProject.durationDays !== 1 ? "s" : ""}`
+                        : formatDate(selectedProject.deadline)}
+                    </p>
                   </div>
                 </div>
               )}
