@@ -238,12 +238,12 @@ export default function OpenJobs() {
   if (loading) return <p className="text-black/60">Loading open jobs...</p>;
 
   return (
-    <div className="bg-white p-6 text-black">
+    <div className="p-6 text-black">
 
       {/* Header */}
       <div className="mb-5 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Open Jobs</h1>
+          <h1 className="text-2xl font-semibold text-black">Open Jobs</h1>
           <p className="text-sm text-black/50 mt-1">
             {filtered.length} job{filtered.length !== 1 ? "s" : ""} available
           </p>
@@ -281,7 +281,7 @@ export default function OpenJobs() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by title, tags, or category..."
-            className="w-full rounded-xl border border-black/20 py-3 pl-10 pr-10 text-sm outline-none focus:border-black"
+            className="w-full rounded-xl border border-black/20 bg-white text-black py-3 pl-10 pr-10 text-sm outline-none focus:border-black"
           />
           {searchQuery && (
             <button
@@ -296,7 +296,7 @@ export default function OpenJobs() {
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value)}
-          className="rounded-xl border border-black/20 px-3 py-2 text-sm outline-none focus:border-black bg-white min-w-[180px]"
+          className="rounded-xl border border-black/20 px-3 py-2 text-sm outline-none focus:border-black bg-white text-black min-w-[180px]"
         >
           {SORT_OPTIONS.map(({ value, label }) => (
             <option key={value} value={value}>{label}</option>

@@ -2,6 +2,8 @@ import { Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "../app/context/AuthContext";
 import { CurrencyProvider } from "../app/context/CurrencyContext";
+import SolanaProvider from "../app/context/SolanaProvider";
+import { ToastProvider } from "../app/context/ToastContext";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -19,9 +21,13 @@ export default function RootLayout({ children }) {
     <html lang="en" className={spaceGrotesk.className}>
       <body className="min-h-screen flex flex-col">
         <AuthProvider>
-          <CurrencyProvider>
-            {children}
-          </CurrencyProvider>
+          <SolanaProvider>
+            <CurrencyProvider>
+              <ToastProvider>
+                {children}
+              </ToastProvider>
+            </CurrencyProvider>
+          </SolanaProvider>
         </AuthProvider>
       </body>
     </html>

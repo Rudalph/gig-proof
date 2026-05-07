@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, orderBy, query, doc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
-import { X, Pencil, Trash2, Search } from "lucide-react";
+import { X, Pencil, Trash2, Search, ChevronDown, ChevronUp } from "lucide-react";
 import { useCurrency, formatBudget } from "../context/CurrencyContext";
+import { PROFESSIONS } from "../lib/professions";
 
 const DESCRIPTION_WORD_LIMIT = 100;
 const REQUIREMENTS_WORD_LIMIT = 150;
@@ -82,7 +83,6 @@ function FilterGroup({ label, options, selected, onToggle, onClear }) {
   );
 }
 
-const CATEGORIES = ["Web Development", "Mobile App", "UI/UX Design", "Writing", "Marketing", "Other"];
 const EXPERIENCE_LEVELS = ["Beginner", "Intermediate", "Expert"];
 const CURRENCIES = ["USDC", "SOL", "USD", "EUR", "INR"];
 
@@ -95,6 +95,7 @@ export default function UserAddedProjects() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategories, setSelectedCategories] = useState(new Set());
   const [selectedTags, setSelectedTags] = useState(new Set());
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({});
@@ -130,6 +131,8 @@ export default function UserAddedProjects() {
   const allCategories = [...new Set(projects.map((p) => p.category).filter(Boolean))];
   const allTags = [...new Set(projects.flatMap((p) => p.tags || []))];
 
+  const advancedActiveCount = selectedCategories.size + selectedTags.size;
+
   const filtered = projects
     .map((p) => ({ ...p, _score: scoreProject(p, searchQuery) }))
     .filter((p) => {
@@ -146,7 +149,7 @@ export default function UserAddedProjects() {
       budget: selectedProject.budget || "",
       currency: selectedProject.currency || "USDC",
       deadline: selectedProject.deadline || "",
-      category: selectedProject.category || CATEGORIES[0],
+      category: selectedProject.category || PROFESSIONS[0],
       experienceLevel: selectedProject.experienceLevel || EXPERIENCE_LEVELS[0],
       tags: (selectedProject.tags || []).join(", "),
       requirements: selectedProject.requirements || "",
@@ -251,7 +254,7 @@ export default function UserAddedProjects() {
 
   return (
     <div className="mt-8">
-      <h2 className="mb-4 text-xl font-semibold">Your Projects</h2>
+      <h2 className="mb-4 text-xl font-semibold text-black">Your Projects</h2>
 
       {/* Search */}
       {projects.length > 0 && (
@@ -262,7 +265,7 @@ export default function UserAddedProjects() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search your projects..."
-            className="w-full rounded-xl border border-black/20 py-3 pl-10 pr-10 text-sm outline-none focus:border-black"
+            className="w-full rounded-xl border border-black/20 bg-white text-black py-3 pl-10 pr-10 text-sm outline-none focus:border-black"
           />
           {searchQuery && (
             <button
@@ -275,24 +278,41 @@ export default function UserAddedProjects() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters toggle */}
       {projects.length > 0 && (
-        <div className="mb-5 space-y-3">
-          <FilterGroup
-            label="Category"
-            options={allCategories}
-            selected={selectedCategories}
-            onToggle={(v) => toggleSet(setSelectedCategories, v)}
-            onClear={() => setSelectedCategories(new Set())}
-          />
-          {allTags.length > 0 && (
-            <FilterGroup
-              label="Tags"
-              options={allTags}
-              selected={selectedTags}
-              onToggle={(v) => toggleSet(setSelectedTags, v)}
-              onClear={() => setSelectedTags(new Set())}
-            />
+        <div className="mb-5">
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="flex items-center gap-1.5 text-sm font-medium text-black/60 hover:text-black transition mb-3"
+          >
+            {showAdvanced ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            Filters
+            {advancedActiveCount > 0 && (
+              <span className="ml-1 rounded-full bg-black text-white text-xs px-2 py-0.5">
+                {advancedActiveCount}
+              </span>
+            )}
+          </button>
+
+          {showAdvanced && (
+            <div className="space-y-3 rounded-2xl border border-black/10 bg-black/[0.02] p-4">
+              <FilterGroup
+                label="Category"
+                options={allCategories}
+                selected={selectedCategories}
+                onToggle={(v) => toggleSet(setSelectedCategories, v)}
+                onClear={() => setSelectedCategories(new Set())}
+              />
+              {allTags.length > 0 && (
+                <FilterGroup
+                  label="Tags"
+                  options={allTags}
+                  selected={selectedTags}
+                  onToggle={(v) => toggleSet(setSelectedTags, v)}
+                  onClear={() => setSelectedTags(new Set())}
+                />
+              )}
+            </div>
           )}
         </div>
       )}
@@ -320,7 +340,7 @@ export default function UserAddedProjects() {
 
               <div className="mb-4 flex flex-wrap gap-2">
                 {project.tags?.map((tag) => (
-                  <span key={tag} className="rounded-full border border-black/10 px-3 py-1 text-xs">
+                  <span key={tag} className="rounded-full border border-black/10 px-3 py-1 text-xs text-black">
                     {tag}
                   </span>
                 ))}
@@ -416,7 +436,7 @@ export default function UserAddedProjects() {
                       rows="4"
                       value={editData.description}
                       onChange={(e) => field("description", e.target.value)}
-                      className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition ${
+                      className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition bg-white text-black ${
                         editErrors.description ? "border-red-400 focus:border-red-500" : "border-black/20 focus:border-black"
                       }`}
                     />
@@ -443,7 +463,7 @@ export default function UserAddedProjects() {
                       rows="3"
                       value={editData.requirements}
                       onChange={(e) => field("requirements", e.target.value)}
-                      className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition ${
+                      className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition bg-white text-black ${
                         editErrors.requirements ? "border-red-400 focus:border-red-500" : "border-black/20 focus:border-black"
                       }`}
                     />
@@ -467,7 +487,7 @@ export default function UserAddedProjects() {
                       type="number"
                       value={editData.budget}
                       onChange={(e) => field("budget", e.target.value)}
-                      className="w-full rounded-xl border border-black/20 px-3 py-2 text-sm outline-none focus:border-black"
+                      className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
                     />
                   </div>
 
@@ -476,7 +496,7 @@ export default function UserAddedProjects() {
                     <select
                       value={editData.currency}
                       onChange={(e) => field("currency", e.target.value)}
-                      className="w-full rounded-xl border border-black/20 px-3 py-2 text-sm outline-none focus:border-black"
+                      className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
                     >
                       {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
                     </select>
@@ -515,16 +535,16 @@ export default function UserAddedProjects() {
 
               {/* Category / Experience Level */}
               <div className="grid grid-cols-2 gap-4">
-                <div className={isEditing ? "" : "rounded-2xl bg-black/5 px-4 py-3"}>
+                <div className={isEditing ? "" : "rounded-2xl bg-black/5 px-4 py-3 text-black"}>
                   {isEditing ? (
                     <>
                       <label className="mb-1 block text-xs text-black/40">Category</label>
                       <select
                         value={editData.category}
                         onChange={(e) => field("category", e.target.value)}
-                        className="w-full rounded-xl border border-black/20 px-3 py-2 text-sm outline-none focus:border-black"
+                        className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
                       >
-                        {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                        {PROFESSIONS.map((p) => <option key={p}>{p}</option>)}
                       </select>
                     </>
                   ) : (
@@ -535,14 +555,14 @@ export default function UserAddedProjects() {
                   )}
                 </div>
 
-                <div className={isEditing ? "" : "rounded-2xl bg-black/5 px-4 py-3"}>
+                <div className={isEditing ? "" : "rounded-2xl bg-black/5 px-4 py-3 text-black"}>
                   {isEditing ? (
                     <>
                       <label className="mb-1 block text-xs text-black/40">Experience Level</label>
                       <select
                         value={editData.experienceLevel}
                         onChange={(e) => field("experienceLevel", e.target.value)}
-                        className="w-full rounded-xl border border-black/20 px-3 py-2 text-sm outline-none focus:border-black"
+                        className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
                       >
                         {EXPERIENCE_LEVELS.map((l) => <option key={l}>{l}</option>)}
                       </select>
@@ -568,10 +588,11 @@ export default function UserAddedProjects() {
                 </div>
                 {isEditing ? (
                   <>
+                    <p className="mb-1.5 text-xs text-black/40">Separate with commas</p>
                     <input
                       value={editData.tags}
                       onChange={(e) => field("tags", e.target.value)}
-                      placeholder="React, Firebase, Tailwind"
+                      placeholder="e.g. React, Firebase, Tailwind"
                       className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition ${
                         editErrors.tags ? "border-red-400 focus:border-red-500" : "border-black/20 focus:border-black"
                       }`}
@@ -628,7 +649,7 @@ export default function UserAddedProjects() {
           onClick={() => { setShowDeleteModal(false); setDeleteInput(""); }}
         >
           <div
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-md rounded-2xl bg-white text-black p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center gap-3">
@@ -665,7 +686,7 @@ export default function UserAddedProjects() {
                   ? "border-red-300 bg-red-50 focus:border-red-400"
                   : deleteInput === deleteCode
                   ? "border-green-400 bg-green-50"
-                  : "border-black/20 focus:border-black"
+                  : "border-black/20 bg-white text-black focus:border-black"
               }`}
             />
 

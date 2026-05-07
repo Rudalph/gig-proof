@@ -6,6 +6,8 @@ import { Plus, X } from "lucide-react";
 import { doc, setDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
+import { PROFESSIONS } from "../lib/professions";
 
 import UserProjects from "./UserAddedProjects";
 
@@ -25,6 +27,7 @@ export default function AddProjects() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
+  const toast = useToast();
 
   const [description, setDescription] = useState("");
   const [requirements, setRequirements] = useState("");
@@ -50,11 +53,16 @@ export default function AddProjects() {
     e.preventDefault();
 
     if (!user) {
-      alert("Please login first");
+      toast("Please log in first.", "error");
       return;
     }
 
     if (isOverLimit) return;
+
+    if (parseTags(tagsInput).length === 0) {
+      toast("Please add at least one tag.", "error");
+      return;
+    }
 
     setLoading(true);
 
@@ -104,15 +112,15 @@ export default function AddProjects() {
       handleClose();
     } catch (error) {
       console.error("Error adding project:", error);
-      alert(error.message);
+      toast(error.message, "error");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="bg-white p-6 text-black">
-      <h1 className="text-2xl font-semibold">Add Projects</h1>
+    <div className="p-6 text-black">
+      <h1 className="text-2xl font-semibold text-black">Add Projects</h1>
       <UserProjects />
       <button
         onClick={() => setOpen(true)}
@@ -137,12 +145,14 @@ export default function AddProjects() {
 
             <form onSubmit={handleSubmit} className="max-h-[80vh] space-y-4 overflow-y-auto p-5">
               <div>
-                <label className="mb-1 block text-sm font-medium">Project Title</label>
+                <label className="mb-1 block text-sm font-medium">
+                  Project Title <span className="text-red-500">*</span>
+                </label>
                 <input
                   name="title"
                   required
                   placeholder="E.g. Build a React portfolio website"
-                  className="w-full rounded-xl border border-black/20 px-4 py-3 outline-none focus:border-black"
+                  className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                 />
               </div>
 
@@ -173,20 +183,27 @@ export default function AddProjects() {
 
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Budget</label>
+                  <label className="mb-1 block text-sm font-medium">
+                    Budget <span className="text-red-500">*</span>
+                  </label>
                   <input
                     name="budget"
                     type="number"
+                    required
+                    min="0"
                     placeholder="500"
-                    className="w-full rounded-xl border border-black/20 px-4 py-3 outline-none focus:border-black"
+                    className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Currency</label>
+                  <label className="mb-1 block text-sm font-medium">
+                    Currency <span className="text-red-500">*</span>
+                  </label>
                   <select
                     name="currency"
-                    className="w-full rounded-xl border border-black/20 px-4 py-3 outline-none focus:border-black"
+                    required
+                    className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   >
                     <option>USDC</option>
                     <option>SOL</option>
@@ -197,11 +214,14 @@ export default function AddProjects() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Deadline</label>
+                  <label className="mb-1 block text-sm font-medium">
+                    Deadline <span className="text-red-500">*</span>
+                  </label>
                   <input
                     name="deadline"
                     type="date"
-                    className="w-full rounded-xl border border-black/20 px-4 py-3 outline-none focus:border-black"
+                    required
+                    className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   />
                 </div>
               </div>
@@ -211,14 +231,11 @@ export default function AddProjects() {
                   <label className="mb-1 block text-sm font-medium">Category</label>
                   <select
                     name="category"
-                    className="w-full rounded-xl border border-black/20 px-4 py-3 outline-none focus:border-black"
+                    className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   >
-                    <option>Web Development</option>
-                    <option>Mobile App</option>
-                    <option>UI/UX Design</option>
-                    <option>Writing</option>
-                    <option>Marketing</option>
-                    <option>Other</option>
+                    {PROFESSIONS.map((p) => (
+                      <option key={p}>{p}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -226,7 +243,7 @@ export default function AddProjects() {
                   <label className="mb-1 block text-sm font-medium">Experience Level</label>
                   <select
                     name="experienceLevel"
-                    className="w-full rounded-xl border border-black/20 px-4 py-3 outline-none focus:border-black"
+                    className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   >
                     <option>Beginner</option>
                     <option>Intermediate</option>
@@ -237,7 +254,12 @@ export default function AddProjects() {
 
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <label className="text-sm font-medium">Tags</label>
+                  <div>
+                    <label className="text-sm font-medium">
+                      Tags <span className="text-red-500">*</span>
+                    </label>
+                    <span className="ml-2 text-xs text-black/40">Separate with commas</span>
+                  </div>
                   <span className={`text-xs ${tagCount > TAGS_LIMIT ? "text-red-500 font-semibold" : "text-black/40"}`}>
                     {tagCount} / {TAGS_LIMIT} tags
                   </span>
@@ -246,7 +268,7 @@ export default function AddProjects() {
                   name="tags"
                   value={tagsInput}
                   onChange={(e) => setTagsInput(e.target.value)}
-                  placeholder="React, Firebase, Tailwind"
+                  placeholder="e.g. React, Firebase, Tailwind"
                   className={`w-full rounded-xl border px-4 py-3 outline-none transition ${
                     tagCount > TAGS_LIMIT ? "border-red-400 focus:border-red-500" : "border-black/20 focus:border-black"
                   }`}

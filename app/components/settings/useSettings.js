@@ -20,6 +20,7 @@ import {
 import { useRouter } from "next/navigation";
 import { db, auth } from "../../lib/firebase";
 import { useAuth } from "../../context/AuthContext";
+import { useToast } from "../../context/ToastContext";
 
 const defaultSettings = {
   projectUpdates: true,
@@ -32,6 +33,7 @@ const defaultSettings = {
 export default function useSettings() {
   const { user } = useAuth();
   const router = useRouter();
+  const toast = useToast();
 
   const [settings, setSettings] = useState(defaultSettings);
   const [loading, setLoading] = useState(true);
@@ -44,20 +46,12 @@ export default function useSettings() {
 
   useEffect(() => {
     const fetchSettings = async () => {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
+      if (!user) { setLoading(false); return; }
       try {
         const ref = doc(db, "userSettings", user.uid);
         const snap = await getDoc(ref);
-
         if (snap.exists()) {
-          setSettings({
-            ...defaultSettings,
-            ...snap.data(),
-          });
+          setSettings({ ...defaultSettings, ...snap.data() });
         } else {
           await setDoc(ref, {
             ...defaultSettings,
@@ -68,45 +62,31 @@ export default function useSettings() {
         }
       } catch (error) {
         console.error("Error fetching settings:", error);
-        alert("Failed to load settings.");
+        toast("Failed to load settings.", "error");
       } finally {
         setLoading(false);
       }
     };
-
     fetchSettings();
   }, [user]);
 
   const handleToggle = (key) => {
-    setSettings((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleSave = async () => {
-    if (!user) {
-      alert("You must be logged in to save settings.");
-      return;
-    }
-
+    if (!user) { toast("You must be logged in to save settings.", "error"); return; }
     try {
       setSaving(true);
-
       await setDoc(
         doc(db, "userSettings", user.uid),
-        {
-          ...settings,
-          email: user.email,
-          updatedAt: serverTimestamp(),
-        },
+        { ...settings, email: user.email, updatedAt: serverTimestamp() },
         { merge: true }
       );
-
-      alert("Settings saved successfully!");
+      toast("Settings saved.", "success");
     } catch (error) {
       console.error("Error saving settings:", error);
-      alert("Failed to save settings.");
+      toast("Failed to save settings.", "error");
     } finally {
       setSaving(false);
     }
@@ -118,7 +98,7 @@ export default function useSettings() {
       router.replace("/auth");
     } catch (error) {
       console.error("Logout error:", error);
-      alert("Failed to logout.");
+      toast("Failed to log out.", "error");
     }
   };
 
@@ -131,60 +111,39 @@ export default function useSettings() {
   const deleteUserProjects = async (uid) => {
     const projectsRef = collection(db, "users", uid, "projectsAdded");
     const snapshot = await getDocs(projectsRef);
-
     if (snapshot.empty) return;
-
     const batch = writeBatch(db);
-
-    snapshot.forEach((projectDoc) => {
-      batch.delete(projectDoc.ref);
-    });
-
+    snapshot.forEach((projectDoc) => batch.delete(projectDoc.ref));
     await batch.commit();
   };
 
   const handleDeleteAccount = async () => {
     if (!user) return;
-
     if (confirmText !== "DELETE") {
-      alert("Type DELETE to confirm.");
+      toast("Type DELETE to confirm.", "error");
       return;
     }
-
     if (!password) {
-      alert("Enter your password.");
+      toast("Enter your password.", "error");
       return;
     }
-
     try {
       setDeleting(true);
-
       const credential = EmailAuthProvider.credential(user.email, password);
-
       await reauthenticateWithCredential(user, credential);
-
-      // Delete user's project subcollection first
       await deleteUserProjects(user.uid);
-
-      // Delete main Firestore documents
       await deleteDoc(doc(db, "users", user.uid));
       await deleteDoc(doc(db, "userSettings", user.uid));
-
-      // Delete Firebase Authentication account
       await deleteUser(user);
-
       router.replace("/auth");
     } catch (error) {
       console.error("Delete error:", error);
-
-      if (error.code === "auth/wrong-password") {
-        alert("Wrong password.");
-      } else if (error.code === "auth/invalid-credential") {
-        alert("Invalid password.");
+      if (error.code === "auth/wrong-password" || error.code === "auth/invalid-credential") {
+        toast("Wrong password.", "error");
       } else if (error.code === "auth/requires-recent-login") {
-        alert("Please login again and try deleting your account.");
+        toast("Please log in again before deleting your account.", "error");
       } else {
-        alert("Failed to delete account.");
+        toast("Failed to delete account.", "error");
       }
     } finally {
       setDeleting(false);
@@ -192,21 +151,8 @@ export default function useSettings() {
   };
 
   return {
-    user,
-    settings,
-    loading,
-    saving,
-    showDelete,
-    confirmText,
-    password,
-    deleting,
-    setShowDelete,
-    setConfirmText,
-    setPassword,
-    handleToggle,
-    handleSave,
-    handleLogout,
-    handleCancelDelete,
-    handleDeleteAccount,
+    user, settings, loading, saving, showDelete, confirmText, password, deleting,
+    setShowDelete, setConfirmText, setPassword,
+    handleToggle, handleSave, handleLogout, handleCancelDelete, handleDeleteAccount,
   };
 }

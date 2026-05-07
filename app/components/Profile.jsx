@@ -6,7 +6,8 @@ import { db } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, DISPLAY_CURRENCIES } from "../context/CurrencyContext";
 import { PROFESSIONS, COUNTRIES } from "../lib/professions";
-import { Search, X, Check } from "lucide-react";
+import { Search, X, Check, Copy } from "lucide-react";
+import { useToast } from "../context/ToastContext";
 
 const EXPERIENCE_OPTIONS = ["Beginner", "Intermediate", "Expert"];
 const AVAILABILITY_OPTIONS = ["Full-time", "Part-time", "Project-based"];
@@ -25,11 +26,14 @@ function toEur(amount, currency, rates) {
 export default function Profile() {
   const { user } = useAuth();
   const { rates } = useCurrency();
+  const toast = useToast();
 
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showProfessionPicker, setShowProfessionPicker] = useState(false);
   const [professionSearch, setProfessionSearch] = useState("");
+  const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const [profile, setProfile] = useState({
     name: "",
@@ -111,7 +115,7 @@ export default function Profile() {
       setProfessionSearch("");
     } catch (error) {
       console.error("Error saving profile:", error);
-      alert("Failed to save profile.");
+      toast("Failed to save profile.", "error");
     }
   };
 
@@ -189,13 +193,13 @@ export default function Profile() {
                   value={profile.city}
                   onChange={handleChange}
                   placeholder="City"
-                  className="w-full rounded-2xl border border-black/10 px-4 py-3 outline-none focus:border-black text-sm"
+                  className="w-full rounded-2xl border border-black/10 bg-white text-black px-4 py-3 outline-none focus:border-black text-sm"
                 />
                 <select
                   name="country"
                   value={profile.country}
                   onChange={handleChange}
-                  className="w-full rounded-2xl border border-black/10 px-4 py-3 outline-none focus:border-black text-sm bg-white"
+                  className="w-full rounded-2xl border border-black/10 bg-white text-black px-4 py-3 outline-none focus:border-black text-sm"
                 >
                   <option value="">Select country</option>
                   {COUNTRIES.map((c) => (
@@ -211,7 +215,34 @@ export default function Profile() {
           </div>
 
           <ProfileField label="Skills" name="skills" value={profile.skills} isEditing={isEditing} onChange={handleChange} />
-          <ProfileField label="Wallet Address" name="walletAddress" value={profile.walletAddress} isEditing={isEditing} onChange={handleChange} />
+          {/* Wallet Address — hidden in view mode */}
+          <div>
+            <label className="block text-sm font-medium text-black/70 mb-2">Wallet Address</label>
+            {isEditing ? (
+              <input
+                type="text"
+                name="walletAddress"
+                value={profile.walletAddress}
+                onChange={handleChange}
+                placeholder="Enter wallet address"
+                className="w-full rounded-2xl border border-black/10 bg-white text-black px-4 py-3 outline-none focus:border-black"
+              />
+            ) : (
+              <div className="flex items-center gap-2 rounded-2xl bg-black/5 px-4 py-3 min-h-12 overflow-hidden">
+                <span className="flex-1 min-w-0 font-mono text-sm text-black/50 tracking-wider truncate">
+                  {profile.walletAddress ? "••••••••••••••••" : "Not added"}
+                </span>
+                {profile.walletAddress && (
+                  <button
+                    onClick={() => setWalletModalOpen(true)}
+                    className="shrink-0 rounded-lg bg-black px-3 py-1.5 text-xs font-medium text-white transition hover:bg-black/80"
+                  >
+                    View
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="mt-5">
@@ -223,7 +254,7 @@ export default function Profile() {
               onChange={handleChange}
               rows="4"
               placeholder="Tell us about yourself"
-              className="w-full rounded-2xl border border-black/10 px-4 py-3 outline-none focus:border-black resize-none"
+              className="w-full rounded-2xl border border-black/10 bg-white text-black px-4 py-3 outline-none focus:border-black resize-none"
             />
           ) : (
             <p className="min-h-[5rem] rounded-2xl bg-black/5 px-4 py-3 text-black/80">
@@ -252,7 +283,7 @@ export default function Profile() {
                     className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
                       profile.primaryRole === opt
                         ? "border-black bg-black text-white"
-                        : "border-black/10 hover:border-black/30"
+                        : "border-black/10 text-black hover:border-black/30"
                     }`}
                   >
                     {opt}
@@ -443,7 +474,7 @@ export default function Profile() {
                     name="hourlyRateCurrency"
                     value={profile.hourlyRateCurrency}
                     onChange={handleChange}
-                    className="rounded-2xl border border-black/10 px-3 py-3 outline-none focus:border-black bg-white text-sm min-w-[90px]"
+                    className="rounded-2xl border border-black/10 bg-white text-black px-3 py-3 outline-none focus:border-black text-sm min-w-[90px]"
                   >
                     {DISPLAY_CURRENCIES.map(({ code, symbol }) => (
                       <option key={code} value={code}>{symbol} {code}</option>
@@ -474,6 +505,42 @@ export default function Profile() {
 
         </div>
       </div>
+      {/* Wallet address view modal */}
+      {walletModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => { setWalletModalOpen(false); setCopied(false); }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white shadow-2xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-black">Wallet Address</h2>
+              <button
+                onClick={() => { setWalletModalOpen(false); setCopied(false); }}
+                className="rounded-full p-2 transition hover:bg-black hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="break-all rounded-2xl bg-black/5 px-4 py-4 font-mono text-sm text-black/80 mb-4 select-all leading-relaxed">
+              {profile.walletAddress}
+            </p>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(profile.walletAddress);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 text-sm font-medium text-white transition hover:bg-black/80"
+            >
+              {copied ? <Check size={16} /> : <Copy size={16} />}
+              {copied ? "Copied!" : "Copy Address"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -489,7 +556,7 @@ function ProfileField({ label, name, value, isEditing, onChange }) {
           value={value}
           onChange={onChange}
           placeholder={`Enter ${label.toLowerCase()}`}
-          className="w-full rounded-2xl border border-black/10 px-4 py-3 outline-none focus:border-black"
+          className="w-full rounded-2xl border border-black/10 bg-white text-black px-4 py-3 outline-none focus:border-black"
         />
       ) : (
         <p className="rounded-2xl bg-black/5 px-4 py-3 text-black/80 min-h-12">
