@@ -9,6 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@solana/wallet-adapter-base": "^0.9.27",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/wallet-adapter-wallets": "^0.19.38",
+    "@solana/web3.js": "^1.98.4",
     "firebase": "^12.12.1",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
