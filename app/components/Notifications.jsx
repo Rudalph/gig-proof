@@ -27,7 +27,7 @@ function timeAgo(ts) {
 
 export default function Notifications() {
   const { user } = useAuth();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
   const { connection } = useConnection();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +37,7 @@ export default function Notifications() {
   const [declineReason, setDeclineReason] = useState("");
   const [viewProfile, setViewProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [escrowError, setEscrowError] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -76,33 +77,48 @@ export default function Notifications() {
     try {
       let escrowTx = null;
 
-      // Attempt to lock USDC in escrow if both wallets are connected
+      // Attempt to lock USDC in escrow if Phantom is connected
       if (publicKey) {
-        try {
-          const [freelancerSnap, projectSnap] = await Promise.all([
-            getDoc(doc(db, "users", notif.fromUid)),
-            getDoc(doc(db, "projects", notif.projectId)),
-          ]);
-          const freelancerWallet = freelancerSnap.data()?.walletAddress;
-          const budget = projectSnap.data()?.budget;
+        const [freelancerSnap, projectSnap] = await Promise.all([
+          getDoc(doc(db, "users", notif.fromUid)),
+          getDoc(doc(db, "projects", notif.projectId)),
+        ]);
+        const freelancerWallet = freelancerSnap.data()?.walletAddress;
+        const budget = projectSnap.data()?.budget;
 
-          if (freelancerWallet && budget) {
-            const freelancerKey = new PublicKey(freelancerWallet);
-            const amountUsdc = Math.round(Number(budget) * 1_000_000);
-            const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, amountUsdc);
-            const sig = await sendTransaction(tx, connection);
-            await connection.confirmTransaction(sig, "confirmed");
-            escrowTx = sig;
-
-            // Persist escrow info to the project documents
-            const escrowData = { escrowCreated: true, escrowTx: sig, approvedFreelancerWallet: freelancerWallet, approvedFreelancerUid: notif.fromUid };
-            await Promise.all([
-              updateDoc(doc(db, "projects", notif.projectId), escrowData),
-              updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
-            ]);
+        if (freelancerWallet && budget && projectSnap.data()?.currency === "USDC") {
+          const freelancerKey = new PublicKey(freelancerWallet);
+          const amountUsdc = Math.round(Number(budget) * 1_000_000);
+          const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, amountUsdc);
+          const sim = await connection.simulateTransaction(tx);
+          if (sim.value.err) {
+            const errJson = JSON.stringify(sim.value.err);
+            // ProgramAccountNotFound = RPC propagation lag; let Phantom handle it
+            if (!errJson.includes("ProgramAccountNotFound")) {
+              const logs = sim.value.logs?.join("\n") || errJson;
+              setEscrowError(logs);
+              return;
+            }
           }
-        } catch (escrowErr) {
-          console.warn("Escrow skipped:", escrowErr.message);
+          let sig;
+          try {
+            const signedTx = await signTransaction(tx);
+            sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+          } catch (sendErr) {
+            const msg = sendErr.message || "";
+            if (!msg.includes("rejected") && !msg.includes("User rejected")) {
+              setEscrowError(msg || "Send failed");
+            }
+            return;
+          }
+          await connection.confirmTransaction(sig, "confirmed");
+          escrowTx = sig;
+
+          const escrowData = { escrowCreated: true, escrowTx: sig, approvedFreelancerWallet: freelancerWallet, approvedFreelancerUid: notif.fromUid };
+          await Promise.all([
+            updateDoc(doc(db, "projects", notif.projectId), escrowData),
+            updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
+          ]);
         }
       }
 
@@ -427,6 +443,26 @@ export default function Notifications() {
           )}
         </div>
       )}
+      {escrowError !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="font-semibold text-black mb-2">Transaction Failed</h3>
+            <p className="text-sm text-black/60 leading-relaxed mb-2">
+              There seems to be an error with the escrow transaction. Please try again after some time.
+            </p>
+            {escrowError && (
+              <pre className="text-xs bg-black/5 rounded-lg p-3 overflow-auto max-h-40 text-black/50 whitespace-pre-wrap">{escrowError}</pre>
+            )}
+            <button
+              onClick={() => setEscrowError(null)}
+              className="mt-5 w-full rounded-xl bg-black py-2.5 text-sm font-medium text-white hover:bg-black/80 transition"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
       {viewProfile && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"

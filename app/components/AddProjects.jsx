@@ -278,25 +278,22 @@ export default function AddProjects() {
                     required
                     className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   >
-                    <optgroup label="Crypto">
-                      <option>USDC</option>
-                      <option>SOL</option>
-                      <option>ETH</option>
-                      <option>BTC</option>
+                    <optgroup label="Crypto (Solana escrow)">
+                      <option value="USDC">USDC</option>
                     </optgroup>
-                    <optgroup label="Fiat">
-                      <option>USD</option>
-                      <option>EUR</option>
-                      <option>GBP</option>
-                      <option>INR</option>
-                      <option>AUD</option>
-                      <option>CAD</option>
-                      <option>JPY</option>
-                      <option>SGD</option>
-                      <option>AED</option>
-                      <option>CHF</option>
-                      <option>BRL</option>
-                      <option>NGN</option>
+                    <optgroup label="Fiat (third-party payment)">
+                      <option value="USD">USD</option>
+                      <option value="EUR">EUR</option>
+                      <option value="GBP">GBP</option>
+                      <option value="INR">INR</option>
+                      <option value="JPY">JPY</option>
+                      <option value="AED">AED</option>
+                      <option value="AUD">AUD</option>
+                      <option value="CAD">CAD</option>
+                      <option value="SGD">SGD</option>
+                      <option value="CHF">CHF</option>
+                      <option value="BRL">BRL</option>
+                      <option value="NGN">NGN</option>
                     </optgroup>
                   </select>
                 </div>

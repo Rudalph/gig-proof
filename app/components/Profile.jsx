@@ -41,6 +41,8 @@ export default function Profile() {
   const [professionSearch, setProfessionSearch] = useState("");
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [usdcLoading, setUsdcLoading] = useState(false);
+  const [usdcResult, setUsdcResult] = useState(null); // { sig } | { error }
 
   const [profile, setProfile] = useState({
     name: "",
@@ -134,6 +136,26 @@ export default function Profile() {
     setIsEditing(false);
     setShowProfessionPicker(false);
     setProfessionSearch("");
+  };
+
+  const handleGetTestUsdc = async () => {
+    if (!publicKey) return;
+    setUsdcLoading(true);
+    setUsdcResult(null);
+    try {
+      const res = await fetch("/api/usdc/airdrop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: publicKey.toString() }),
+      });
+      const data = await res.json();
+      if (data.success) setUsdcResult({ sig: data.signature });
+      else setUsdcResult({ error: data.error || "Failed" });
+    } catch {
+      setUsdcResult({ error: "Network error" });
+    } finally {
+      setUsdcLoading(false);
+    }
   };
 
   const filteredProfessions = PROFESSIONS.filter((p) =>
@@ -277,6 +299,38 @@ export default function Profile() {
                 <Wallet size={16} />
                 {connecting ? "Connecting..." : "Connect Phantom Wallet"}
               </button>
+            )}
+
+            {/* Devnet USDC faucet — only when wallet is connected */}
+            {connected && publicKey && (
+              <div className="mt-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleGetTestUsdc}
+                    disabled={usdcLoading}
+                    className="shrink-0 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-50"
+                  >
+                    {usdcLoading ? "Sending…" : "Get 500 Test USDC"}
+                  </button>
+                  <span className="text-xs text-black/40">Devnet only — for testing the escrow flow</span>
+                </div>
+                {usdcResult?.sig && (
+                  <p className="mt-1.5 text-xs text-emerald-600">
+                    500 USDC sent! &nbsp;
+                    <a
+                      href={`https://solscan.io/tx/${usdcResult.sig}?cluster=devnet`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-2"
+                    >
+                      View tx
+                    </a>
+                  </p>
+                )}
+                {usdcResult?.error && (
+                  <p className="mt-1.5 text-xs text-red-500">{usdcResult.error}</p>
+                )}
+              </div>
             )}
           </div>
         </div>

@@ -104,6 +104,8 @@ export default function DashboardHome({ setActivePage }) {
   const [solBalance, setSolBalance] = useState(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [selectedPostedJob, setSelectedPostedJob] = useState(null);
+  const [usdcLoading, setUsdcLoading] = useState(false);
+  const [usdcResult, setUsdcResult] = useState(null);
 
   useEffect(() => {
     const check = () => {
@@ -193,6 +195,26 @@ export default function DashboardHome({ setActivePage }) {
   const handleDisconnect = () => {
     setConfirmAction(null);
     disconnect();
+  };
+
+  const handleGetTestUsdc = async () => {
+    if (!publicKey) return;
+    setUsdcLoading(true);
+    setUsdcResult(null);
+    try {
+      const res = await fetch("/api/usdc/airdrop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: publicKey.toString() }),
+      });
+      const data = await res.json();
+      if (data.success) setUsdcResult({ sig: data.signature });
+      else setUsdcResult({ error: data.error || "Failed" });
+    } catch {
+      setUsdcResult({ error: "Network error" });
+    } finally {
+      setUsdcLoading(false);
+    }
   };
 
   return (
@@ -387,6 +409,24 @@ export default function DashboardHome({ setActivePage }) {
               >
                 Disconnect
               </button>
+              <button
+                onClick={handleGetTestUsdc}
+                disabled={usdcLoading}
+                className="w-full rounded-xl border border-violet-200 bg-violet-50 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-100 transition disabled:opacity-50"
+              >
+                {usdcLoading ? "Sending…" : "Get 500 Test USDC"}
+              </button>
+              {usdcResult?.sig && (
+                <p className="text-xs text-emerald-600 text-center">
+                  500 USDC sent! &nbsp;
+                  <a href={`https://solscan.io/tx/${usdcResult.sig}?cluster=devnet`} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    View tx
+                  </a>
+                </p>
+              )}
+              {usdcResult?.error && (
+                <p className="text-xs text-red-500 text-center">{usdcResult.error}</p>
+              )}
             </div>
           ) : (
             <div>

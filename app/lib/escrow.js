@@ -7,10 +7,11 @@ import {
 } from "@solana/web3.js";
 
 export const ESCROW_PROGRAM_ID = new PublicKey("fcJqPBDpSNmdRQZqmZxF2V1yJDtSEqn44wSCcjy6gcg");
+// ProgramData account required by BPFLoaderUpgradeable in Agave 3.x
+const ESCROW_PROGRAM_DATA = new PublicKey("Gpk1MiFBTni17LSapxGF7NsX3MNogGMvCAWCuKYgBbPi");
 export const USDC_DEVNET_MINT = new PublicKey("AKZ8aZN6jLVLZbvvcTGvihz7sE6EzLm4vwD9cCcdkjDh");
 
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bM");
 
 async function disc(name) {
   const input = new TextEncoder().encode(`global:${name}`);
@@ -54,17 +55,17 @@ function vaultPda(escrowKey) {
   );
 }
 
-function ata(ownerKey, mintKey) {
-  return PublicKey.findProgramAddressSync(
-    [ownerKey.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mintKey.toBytes()],
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
+
+async function findTokenAccount(connection, ownerKey, mintKey) {
+  const accounts = await connection.getTokenAccountsByOwner(ownerKey, { mint: mintKey });
+  if (accounts.value.length === 0) throw new Error("No USDC token account found — fund the wallet first");
+  return accounts.value[0].pubkey;
 }
 
 export async function buildCreateEscrowTx(connection, clientKey, freelancerKey, projectId, amountUsdc) {
   const [escrow] = escrowPda(clientKey, projectId);
   const [vault] = vaultPda(escrow);
-  const [clientAta] = ata(clientKey, USDC_DEVNET_MINT);
+  const clientAta = await findTokenAccount(connection, clientKey, USDC_DEVNET_MINT);
 
   const d = await disc("create_escrow");
   const args = encodeCreateEscrowArgs(projectId, amountUsdc, freelancerKey);
@@ -72,7 +73,7 @@ export async function buildCreateEscrowTx(connection, clientKey, freelancerKey, 
   data.set(d);
   data.set(args, d.length);
 
-  const ix = new TransactionInstruction({
+  const escrowIx = new TransactionInstruction({
     programId: ESCROW_PROGRAM_ID,
     keys: [
       { pubkey: clientKey, isSigner: true, isWritable: true },
@@ -84,20 +85,21 @@ export async function buildCreateEscrowTx(connection, clientKey, freelancerKey, 
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+      { pubkey: ESCROW_PROGRAM_DATA, isSigner: false, isWritable: false },
     ],
     data,
   });
 
   const { blockhash } = await connection.getLatestBlockhash();
   const tx = new Transaction({ feePayer: clientKey, recentBlockhash: blockhash });
-  tx.add(ix);
+  tx.add(escrowIx);
   return tx;
 }
 
 export async function buildReleasePaymentTx(connection, clientKey, freelancerKey, projectId) {
   const [escrow] = escrowPda(clientKey, projectId);
   const [vault] = vaultPda(escrow);
-  const [freelancerAta] = ata(freelancerKey, USDC_DEVNET_MINT);
+  const freelancerAta = await findTokenAccount(connection, freelancerKey, USDC_DEVNET_MINT);
 
   const d = await disc("release_payment");
 
@@ -110,6 +112,7 @@ export async function buildReleasePaymentTx(connection, clientKey, freelancerKey
       { pubkey: vault, isSigner: false, isWritable: true },
       { pubkey: freelancerAta, isSigner: false, isWritable: true },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: ESCROW_PROGRAM_DATA, isSigner: false, isWritable: false },
     ],
     data: d,
   });
@@ -123,7 +126,7 @@ export async function buildReleasePaymentTx(connection, clientKey, freelancerKey
 export async function buildRefundTx(connection, clientKey, projectId) {
   const [escrow] = escrowPda(clientKey, projectId);
   const [vault] = vaultPda(escrow);
-  const [clientAta] = ata(clientKey, USDC_DEVNET_MINT);
+  const clientAta = await findTokenAccount(connection, clientKey, USDC_DEVNET_MINT);
 
   const d = await disc("refund");
 
@@ -135,6 +138,7 @@ export async function buildRefundTx(connection, clientKey, projectId) {
       { pubkey: vault, isSigner: false, isWritable: true },
       { pubkey: clientAta, isSigner: false, isWritable: true },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: ESCROW_PROGRAM_DATA, isSigner: false, isWritable: false },
     ],
     data: d,
   });

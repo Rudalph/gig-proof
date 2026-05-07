@@ -343,7 +343,7 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
             </div>
           )}
 
-          {project.escrowCreated && (
+          {project.escrowCreated && project.currency === "USDC" && (
             <div className="rounded-xl border border-black/8 bg-black/2 p-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-black/35">Escrow</p>
               {project.escrowTx && (
@@ -357,7 +357,7 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
                   USDC locked · view on Solscan
                 </a>
               )}
-              {escrowMsg && (
+              {escrowMsg && !project.paymentReleasedTx && (
                 <div className={`text-xs px-3 py-2 rounded-lg ${escrowMsg.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
                   {escrowMsg.text}
                   {escrowMsg.tx && (
@@ -367,22 +367,38 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
                   )}
                 </div>
               )}
-              <div className="flex gap-2">
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleRelease(); }}
-                  disabled={escrowProcessing || !publicKey}
-                  className="rounded-full bg-black px-4 py-1.5 text-xs font-medium text-white hover:bg-black/80 disabled:opacity-40 transition"
-                >
-                  {escrowProcessing ? "Processing…" : "Release Payment"}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleRefund(); }}
-                  disabled={escrowProcessing || !publicKey}
-                  className="rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-40 transition"
-                >
-                  Refund
-                </button>
-              </div>
+              {project.paymentReleasedTx ? (
+                <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                  <CheckCircle2 size={13} />
+                  Payment released ·{" "}
+                  <a
+                    href={`https://solscan.io/tx/${project.paymentReleasedTx}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    View tx
+                  </a>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleRelease(); }}
+                    disabled={escrowProcessing || !publicKey}
+                    className="rounded-full bg-black px-4 py-1.5 text-xs font-medium text-white hover:bg-black/80 disabled:opacity-40 transition"
+                  >
+                    {escrowProcessing ? "Processing…" : "Release Payment"}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleRefund(); }}
+                    disabled={escrowProcessing || !publicKey}
+                    className="rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-40 transition"
+                  >
+                    Refund
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
