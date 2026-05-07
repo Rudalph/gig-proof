@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
-import { useCurrency, DISPLAY_CURRENCIES } from "../context/CurrencyContext";
 import { Search, X, Check } from "lucide-react";
 import { PROFESSIONS, COUNTRIES } from "../lib/professions";
 
@@ -20,18 +19,8 @@ const EXPERIENCE_OPTIONS = [
 const AVAILABILITY_OPTIONS = ["Full-time", "Part-time", "Project-based"];
 const WORK_TYPE_OPTIONS = ["Individual", "Company / Agency"];
 
-function toEur(amount, currency, rates) {
-  const num = parseFloat(amount);
-  if (!amount || isNaN(num) || num === 0) return null;
-  if (currency === "EUR") return null;
-  const rate = rates[currency];
-  if (!rate) return null;
-  return (num / rate).toFixed(2);
-}
-
 export default function Onboarding() {
   const { user } = useAuth();
-  const { rates } = useCurrency();
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -53,8 +42,6 @@ export default function Onboarding() {
   const [country, setCountry] = useState("");
   const [availability, setAvailability] = useState("");
   const [workType, setWorkType] = useState("");
-  const [hourlyRate, setHourlyRate] = useState("");
-  const [hourlyRateCurrency, setHourlyRateCurrency] = useState("EUR");
   const [bio, setBio] = useState("");
 
   useEffect(() => {
@@ -94,8 +81,6 @@ export default function Onboarding() {
           country,
           availability,
           workType,
-          hourlyRate,
-          hourlyRateCurrency,
           bio,
           onboardingComplete: true,
           email: user.email,
@@ -111,9 +96,6 @@ export default function Onboarding() {
       setSaving(false);
     }
   };
-
-  const eurEquivalent = toEur(hourlyRate, hourlyRateCurrency, rates);
-  const hourlyRateSymbol = DISPLAY_CURRENCIES.find((c) => c.code === hourlyRateCurrency)?.symbol || "";
 
   if (!user) return null;
 
@@ -380,38 +362,6 @@ export default function Onboarding() {
                       </button>
                     ))}
                   </div>
-                </div>
-
-                {/* Hourly Rate with currency + EUR conversion */}
-                <div>
-                  <label className="block text-sm font-medium mb-1.5">
-                    Hourly Rate{" "}
-                    <span className="text-black/40 font-normal">— optional</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      value={hourlyRate}
-                      onChange={(e) => setHourlyRate(e.target.value)}
-                      placeholder="e.g. 50"
-                      className="flex-1 rounded-xl border border-black/20 px-4 py-3 text-sm outline-none focus:border-black"
-                    />
-                    <select
-                      value={hourlyRateCurrency}
-                      onChange={(e) => setHourlyRateCurrency(e.target.value)}
-                      className="rounded-xl border border-black/20 px-3 py-3 text-sm outline-none focus:border-black bg-white min-w-[90px]"
-                    >
-                      {DISPLAY_CURRENCIES.map(({ code, symbol }) => (
-                        <option key={code} value={code}>{symbol} {code}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {eurEquivalent && (
-                    <p className="mt-2 text-sm text-black/50">
-                      ≈ <span className="font-medium text-black">€{eurEquivalent}</span> / hr
-                    </p>
-                  )}
                 </div>
 
                 {/* Bio */}
