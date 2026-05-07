@@ -8,10 +8,15 @@ import {
   query,
   updateDoc,
   doc,
+  setDoc,
 } from "firebase/firestore";
+import { uploadGigRecord, arweaveUrl } from "@/app/lib/arweave";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, formatBudget } from "../context/CurrencyContext";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
+import { buildReleasePaymentTx, buildRefundTx } from "@/app/lib/escrow";
 import {
   Briefcase,
   Clock,
@@ -124,6 +129,87 @@ function StatusBadge({ status }) {
 function ProjectRow({ project, defaultCurrency, rates, userId }) {
   const [expanded, setExpanded] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [escrowProcessing, setEscrowProcessing] = useState(false);
+  const [escrowMsg, setEscrowMsg] = useState(null);
+  const { publicKey, sendTransaction } = useWallet();
+  const { connection } = useConnection();
+
+  const handleRelease = async () => {
+    if (!publicKey || !project.approvedFreelancerWallet) return;
+    setEscrowProcessing(true);
+    setEscrowMsg(null);
+    try {
+      const freelancerKey = new PublicKey(project.approvedFreelancerWallet);
+      const tx = await buildReleasePaymentTx(connection, publicKey, freelancerKey, project.id);
+      const sig = await sendTransaction(tx, connection);
+      await connection.confirmTransaction(sig, "confirmed");
+      const completedData = { status: "completed", paymentReleasedTx: sig };
+      await Promise.all([
+        updateDoc(doc(db, "projects", project.id), completedData),
+        updateDoc(doc(db, "users", userId, "projectsAdded", project.id), completedData),
+      ]);
+
+      // Upload permanent gig record to Arweave
+      if (project.approvedFreelancerUid) {
+        try {
+          const record = {
+            platform: "GigProof",
+            type: "completed_gig",
+            projectId: project.id,
+            projectTitle: project.title,
+            freelancerWallet: project.approvedFreelancerWallet,
+            clientWallet: publicKey.toString(),
+            budget: project.budget,
+            currency: project.currency || "USDC",
+            escrowTx: project.escrowTx || null,
+            paymentTx: sig,
+            completedAt: new Date().toISOString(),
+            description: project.description || "",
+            tags: project.tags || [],
+          };
+          const txId = await uploadGigRecord(record);
+          const gigDoc = {
+            ...record,
+            arweaveTx: txId,
+            arweaveUrl: arweaveUrl(txId),
+            projectTitle: project.title,
+          };
+          await setDoc(
+            doc(db, "users", project.approvedFreelancerUid, "completedGigs", project.id),
+            gigDoc
+          );
+        } catch (arweaveErr) {
+          console.warn("Arweave upload skipped:", arweaveErr.message);
+        }
+      }
+
+      setEscrowMsg({ type: "success", text: "Payment released!", tx: sig });
+    } catch (e) {
+      setEscrowMsg({ type: "error", text: e.message || "Transaction failed" });
+    } finally {
+      setEscrowProcessing(false);
+    }
+  };
+
+  const handleRefund = async () => {
+    if (!publicKey) return;
+    setEscrowProcessing(true);
+    setEscrowMsg(null);
+    try {
+      const tx = await buildRefundTx(connection, publicKey, project.id);
+      const sig = await sendTransaction(tx, connection);
+      await connection.confirmTransaction(sig, "confirmed");
+      await Promise.all([
+        updateDoc(doc(db, "projects", project.id), { status: "cancelled", refundTx: sig, escrowCreated: false }),
+        updateDoc(doc(db, "users", userId, "projectsAdded", project.id), { status: "cancelled", refundTx: sig, escrowCreated: false }),
+      ]);
+      setEscrowMsg({ type: "success", text: "Refund complete!", tx: sig });
+    } catch (e) {
+      setEscrowMsg({ type: "error", text: e.message || "Transaction failed" });
+    } finally {
+      setEscrowProcessing(false);
+    }
+  };
 
   const handleStatusChange = async (newStatus) => {
     if (!userId || project.status === newStatus) return;
@@ -257,6 +343,49 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
             </div>
           )}
 
+          {project.escrowCreated && (
+            <div className="rounded-xl border border-black/8 bg-black/2 p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-black/35">Escrow</p>
+              {project.escrowTx && (
+                <a
+                  href={`https://solscan.io/tx/${project.escrowTx}?cluster=devnet`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-black/50 hover:text-black transition"
+                >
+                  <Wallet size={11} />
+                  USDC locked · view on Solscan
+                </a>
+              )}
+              {escrowMsg && (
+                <div className={`text-xs px-3 py-2 rounded-lg ${escrowMsg.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
+                  {escrowMsg.text}
+                  {escrowMsg.tx && (
+                    <a href={`https://solscan.io/tx/${escrowMsg.tx}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="ml-2 underline">
+                      View tx
+                    </a>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRelease(); }}
+                  disabled={escrowProcessing || !publicKey}
+                  className="rounded-full bg-black px-4 py-1.5 text-xs font-medium text-white hover:bg-black/80 disabled:opacity-40 transition"
+                >
+                  {escrowProcessing ? "Processing…" : "Release Payment"}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRefund(); }}
+                  disabled={escrowProcessing || !publicKey}
+                  className="rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-40 transition"
+                >
+                  Refund
+                </button>
+              </div>
+            </div>
+          )}
+
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/35">Update Status</p>
             <div className="flex flex-wrap gap-2">
@@ -288,6 +417,7 @@ export default function WorkHistory() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("client");
+  const [completedGigs, setCompletedGigs] = useState([]);
 
   useEffect(() => {
     if (!user) return;
@@ -301,6 +431,14 @@ export default function WorkHistory() {
     });
 
     return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const ref = collection(db, "users", user.uid, "completedGigs");
+    return onSnapshot(ref, (snap) => {
+      setCompletedGigs(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
   }, [user]);
 
   if (!user) return null;
@@ -433,15 +571,57 @@ export default function WorkHistory() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-dashed border-black/15 p-12 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-black/5">
-              <Briefcase size={24} className="text-black/25" />
+          {completedGigs.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-black/15 p-12 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-black/5">
+                <Briefcase size={24} className="text-black/25" />
+              </div>
+              <p className="font-semibold text-black/50">No completed gigs yet</p>
+              <p className="mt-1 text-sm text-black/35">Browse Open Jobs to find your first project.</p>
             </div>
-            <p className="font-semibold text-black/50">No completed gigs yet</p>
-            <p className="mt-1 text-sm text-black/35">
-              Browse Open Jobs to find your first project.
-            </p>
-          </div>
+          ) : (
+            <div className="space-y-3">
+              {completedGigs.map((gig) => (
+                <div key={gig.id} className="rounded-2xl border border-black/8 bg-white p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-black truncate">{gig.projectTitle}</h3>
+                      <p className="mt-0.5 text-xs text-black/40">
+                        {gig.budget} {gig.currency} · {gig.completedAt ? new Date(gig.completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : ""}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
+                      Completed
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {gig.arweaveTx && (
+                      <a
+                        href={gig.arweaveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-black/4 px-3 py-1 text-xs text-black/60 hover:text-black transition"
+                      >
+                        <Star size={10} />
+                        Permanent record · Arweave
+                      </a>
+                    )}
+                    {gig.paymentTx && (
+                      <a
+                        href={`https://solscan.io/tx/${gig.paymentTx}?cluster=devnet`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-black/4 px-3 py-1 text-xs text-black/60 hover:text-black transition"
+                      >
+                        <Wallet size={10} />
+                        Payment tx · Solscan
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
