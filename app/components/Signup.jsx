@@ -15,8 +15,7 @@ export default function SignupPage() {
 
     try {
       await createUserWithEmailAndPassword(auth, email, password);
-      alert("Signup successful!");
-      window.location.reload();
+      router.push("/onboarding");
     } catch (error) {
       console.error(error);
       alert(error.message);
