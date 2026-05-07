@@ -14,6 +14,23 @@ const AVAILABILITY_OPTIONS = ["Full-time", "Part-time", "Project-based"];
 const WORK_TYPE_OPTIONS = ["Individual", "Company / Agency"];
 const PRIMARY_ROLE_OPTIONS = ["Freelancer", "Client / Hiring", "Both"];
 
+function computeCompletion(profile) {
+  const checks = [
+    !!profile.name?.trim(),
+    !!profile.bio?.trim(),
+    !!profile.skills?.trim(),
+    !!profile.role?.trim(),
+    !!(profile.city?.trim() || profile.country?.trim()),
+    (profile.professions?.length || 0) > 0,
+    !!profile.experienceLevel,
+    !!profile.availability,
+    !!profile.workType,
+    !!profile.hourlyRate,
+    !!profile.walletAddress?.trim(),
+  ];
+  return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+}
+
 function toEur(amount, currency, rates) {
   const num = parseFloat(amount);
   if (!amount || isNaN(num) || num === 0) return null;
@@ -136,6 +153,8 @@ export default function Profile() {
 
   if (loading) return <p className="text-black/60">Loading profile...</p>;
 
+  const completion = computeCompletion(profile);
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
 
@@ -163,6 +182,26 @@ export default function Profile() {
             </button>
           </div>
         </div>
+
+        {!isEditing && (
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-black/50">Profile completion</span>
+              <span className="text-xs font-semibold text-black">{completion}%</span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-black/8">
+              <div
+                className="h-1.5 rounded-full bg-black transition-all duration-500"
+                style={{ width: `${completion}%` }}
+              />
+            </div>
+            {completion < 100 && (
+              <p className="mt-1.5 text-xs text-black/40">
+                {completion < 50 ? "Add more details to stand out" : completion < 80 ? "Looking good — keep going!" : "Almost complete!"}
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-5 mb-8">
           <div className="w-20 h-20 rounded-full bg-black text-white flex items-center justify-center text-3xl font-semibold shrink-0">

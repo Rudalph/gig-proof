@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   UserRoundCheck,
@@ -17,6 +17,8 @@ import {
 import LogoutButton from "./Logout";
 
 import { useAuth } from "../context/AuthContext";
+import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+import { db } from "../lib/firebase";
 
 const navItems = [
   { label: "Dashboard", href: "#", icon: LayoutDashboard },
@@ -32,6 +34,20 @@ export default function Sidebar({ activePage, setActivePage }) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   const { user } = useAuth();
+  const [hasNewJobs, setHasNewJobs] = useState(false);
+
+  useEffect(() => {
+    const q = query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(1));
+    return onSnapshot(q, (snap) => {
+      if (snap.empty) return;
+      const latest = snap.docs[0].data().createdAt?.toDate?.();
+      if (!latest) return;
+      try {
+        const lastSeen = localStorage.getItem("lastSeenOpenJobs");
+        if (!lastSeen || new Date(lastSeen) < latest) setHasNewJobs(true);
+      } catch {}
+    });
+  }, []);
 
   const userName =
   user?.displayName ||
@@ -105,7 +121,13 @@ export default function Sidebar({ activePage, setActivePage }) {
             <button
               key={item.label}
               type="button"
-              onClick={() => setActivePage(item.label)}
+              onClick={() => {
+                setActivePage(item.label);
+                if (item.label === "Open Jobs") {
+                  try { localStorage.setItem("lastSeenOpenJobs", new Date().toISOString()); } catch {}
+                  setHasNewJobs(false);
+                }
+              }}
               className={`flex w-full items-center rounded-xl px-3 py-3 text-sm font-medium transition-all duration-300
               ${
                 activePage === item.label
@@ -114,7 +136,12 @@ export default function Sidebar({ activePage, setActivePage }) {
               }
               ${isOpen ? "justify-start gap-3" : "justify-center"}`}
             >
-              <Icon size={22} className="shrink-0" />
+              <div className="relative shrink-0">
+                <Icon size={22} />
+                {item.label === "Open Jobs" && hasNewJobs && activePage !== "Open Jobs" && (
+                  <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500" />
+                )}
+              </div>
               {isOpen && <span>{item.label}</span>}
             </button>
           );
