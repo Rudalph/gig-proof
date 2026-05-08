@@ -1,0 +1,13 @@
+Dockerfile
+.dockerignore
+node_modules
+.next
+.git
+.gitignore
+.env.local
+.env*.local
+.claude
+escrow
+rustup-init.exe
+agave-install-init-x86_64-pc-windows-msvc.exe
+README.md

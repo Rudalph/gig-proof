@@ -1,0 +1,8 @@
+services:
+  gig-proof:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - SOLANA_KEYPAIR=${SOLANA_KEYPAIR}
+    restart: unless-stopped
