@@ -830,7 +830,8 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
     try {
       const freelancerKey = new PublicKey(project.approvedFreelancerWallet);
       const tx = await buildReleasePaymentTx(connection, publicKey, freelancerKey, project.id);
-      const sig = await sendTransaction(tx, connection);
+      const signedTx = await signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signedTx.serialize());
       await connection.confirmTransaction(sig, "confirmed");
       const completedData = { status: "completed", paymentReleasedTx: sig };
       await Promise.all([
@@ -894,7 +895,10 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
 
       setEscrowMsg({ type: "success", text: "Payment released!", tx: sig });
     } catch (e) {
-      setEscrowMsg({ type: "error", text: e.message || "Transaction failed" });
+      const msg = e.message?.startsWith("FREELANCER_NO_ATA:")
+        ? e.message.replace("FREELANCER_NO_ATA: ", "")
+        : e.message || "Transaction failed";
+      setEscrowMsg({ type: "error", text: msg });
     } finally {
       setEscrowProcessing(false);
     }
@@ -909,7 +913,7 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
       const amountUsdc = Math.round(Number(project.budget) * 1_000_000);
       const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, project.id, amountUsdc);
       const signedTx = await signTransaction(tx);
-      const sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+      const sig = await connection.sendRawTransaction(signedTx.serialize());
       await connection.confirmTransaction(sig, "confirmed");
       const escrowData = { escrowCreated: true, escrowTx: sig };
       await Promise.all([

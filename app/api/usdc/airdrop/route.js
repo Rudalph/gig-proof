@@ -9,29 +9,22 @@ import {
 } from "@solana/web3.js";
 
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bM");
 const USDC_MINT = new PublicKey("AKZ8aZN6jLVLZbvvcTGvihz7sE6EzLm4vwD9cCcdkjDh");
 const AIRDROP_AMOUNT = 500_000_000n; // 500 USDC (6 decimals)
+const TOKEN_ACCOUNT_SIZE = 165;
 
-function findAta(owner, mint) {
-  return PublicKey.findProgramAddressSync(
-    [owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()],
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  )[0];
-}
-
-function createAtaIdempotentIx(payer, ata, owner, mint) {
+// Token Program InitializeAccount3 (index 18) — no rent sysvar needed
+function initializeAccount3Ix(account, mint, owner) {
+  const data = Buffer.alloc(33);
+  data.writeUInt8(18, 0);
+  owner.toBytes().forEach((b, i) => data.writeUInt8(b, 1 + i));
   return new TransactionInstruction({
-    programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+    programId: TOKEN_PROGRAM_ID,
     keys: [
-      { pubkey: payer, isSigner: true, isWritable: true },
-      { pubkey: ata, isSigner: false, isWritable: true },
-      { pubkey: owner, isSigner: false, isWritable: false },
+      { pubkey: account, isSigner: false, isWritable: true },
       { pubkey: mint, isSigner: false, isWritable: false },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
-    data: Buffer.from([1]), // instruction 1 = CreateIdempotent
+    data,
   });
 }
 
@@ -62,6 +55,9 @@ export async function POST(req) {
       return NextResponse.json({ error: "Invalid wallet address" }, { status: 400 });
     }
 
+    if (!process.env.SOLANA_KEYPAIR) {
+      return NextResponse.json({ error: "SOLANA_KEYPAIR env var not configured" }, { status: 500 });
+    }
     const keypairBytes = JSON.parse(process.env.SOLANA_KEYPAIR);
     const payer = Keypair.fromSecretKey(Uint8Array.from(keypairBytes));
 
@@ -71,12 +67,28 @@ export async function POST(req) {
 
     const tx = new Transaction();
     let destination;
+    let newTokenAccount = null;
 
     if (existing.value.length > 0) {
       destination = existing.value[0].pubkey;
     } else {
-      destination = findAta(recipient, USDC_MINT);
-      tx.add(createAtaIdempotentIx(payer.publicKey, destination, recipient, USDC_MINT));
+      // Create a new token account using only System Program + Token Program.
+      // Avoids calling the ATA program directly (incompatible with Agave 2.x devnet).
+      newTokenAccount = Keypair.generate();
+      destination = newTokenAccount.publicKey;
+
+      const lamports = await connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SIZE);
+
+      tx.add(
+        SystemProgram.createAccount({
+          fromPubkey: payer.publicKey,
+          newAccountPubkey: destination,
+          lamports,
+          space: TOKEN_ACCOUNT_SIZE,
+          programId: TOKEN_PROGRAM_ID,
+        })
+      );
+      tx.add(initializeAccount3Ix(destination, USDC_MINT, recipient));
     }
 
     tx.add(mintToIx(USDC_MINT, destination, payer.publicKey, AIRDROP_AMOUNT));
@@ -84,7 +96,10 @@ export async function POST(req) {
     const { blockhash } = await connection.getLatestBlockhash();
     tx.recentBlockhash = blockhash;
     tx.feePayer = payer.publicKey;
-    tx.sign(payer);
+
+    // Sign with payer always; also sign with the new token account keypair if we created one
+    const signers = newTokenAccount ? [payer, newTokenAccount] : [payer];
+    tx.sign(...signers);
 
     const sig = await connection.sendRawTransaction(tx.serialize());
     await connection.confirmTransaction(sig, "confirmed");

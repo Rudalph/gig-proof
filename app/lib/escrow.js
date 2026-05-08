@@ -67,6 +67,14 @@ export async function buildCreateEscrowTx(connection, clientKey, freelancerKey, 
   const [vault] = vaultPda(escrow);
   const clientAta = await findTokenAccount(connection, clientKey, USDC_DEVNET_MINT);
 
+  const tokenBalance = await connection.getTokenAccountBalance(clientAta);
+  const balance = BigInt(tokenBalance.value.amount);
+  if (balance < BigInt(amountUsdc)) {
+    const have = (Number(balance) / 1_000_000).toFixed(2);
+    const need = (amountUsdc / 1_000_000).toFixed(2);
+    throw new Error(`Insufficient devnet USDC — wallet has ${have} USDC but escrow requires ${need} USDC. Get devnet USDC from a faucet first.`);
+  }
+
   const d = await disc("create_escrow");
   const args = encodeCreateEscrowArgs(projectId, amountUsdc, freelancerKey);
   const data = new Uint8Array(d.length + args.length);
@@ -99,7 +107,15 @@ export async function buildCreateEscrowTx(connection, clientKey, freelancerKey, 
 export async function buildReleasePaymentTx(connection, clientKey, freelancerKey, projectId) {
   const [escrow] = escrowPda(clientKey, projectId);
   const [vault] = vaultPda(escrow);
-  const freelancerAta = await findTokenAccount(connection, freelancerKey, USDC_DEVNET_MINT);
+
+  const ataAccounts = await connection.getTokenAccountsByOwner(freelancerKey, { mint: USDC_DEVNET_MINT });
+  if (ataAccounts.value.length === 0) {
+    throw new Error(
+      "FREELANCER_NO_ATA: The freelancer hasn't set up their USDC wallet yet. " +
+      "Ask them to visit their Profile page and click 'Get 500 Test USDC' to create it."
+    );
+  }
+  const freelancerAta = ataAccounts.value[0].pubkey;
 
   const d = await disc("release_payment");
 
