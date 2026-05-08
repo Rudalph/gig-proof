@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git config *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\achal\\\\Downloads\\\\gig-proof\" -Force)",
+      "Bash(Select-Object Name)",
+      "Bash(Get-Content package.json)",
+      "Bash(npm install *)",
+      "Bash(npx next *)",
+      "Bash(del \"c:\\\\Users\\\\achal\\\\Downloads\\\\gig-proof\\\\app\\\\context\\\\DarkModeContext.jsx\")",
+      "Bash(git commit --amend -m 'Add analytics, notifications upgrade, duration/time improvements, and profile cleanup *)",
+      "Bash(node -e \"require\\('@solana/web3.js'\\); console.log\\('ok'\\)\")",
+      "Bash(npm run *)",
+      "Bash(git commit *)",
+      "Bash(rustc --version)",
+      "Bash(cargo --version)",
+      "Bash(solana --version)",
+      "Bash(solana config *)",
+      "Bash(ls \"C:\\\\Users\\\\achal\\\\.local\\\\share\\\\solana\\\\install\\\\active_release\\\\bin\\\\\" 2>/dev/null | head -5 || ls \"C:\\\\Users\\\\achal\\\\AppData\\\\Local\\\\solana\\\\install\\\\active_release\\\\bin\\\\\" 2>/dev/null | head -5)",
+      "Read(//c/Users/achal/.local/share/solana/install/active_release/bin\" 2>/dev/**)",
+      "Read(//c/Users/achal/**)",
+      "Bash(del \"c:\\\\Users\\\\achal\\\\Downloads\\\\gig-proof\\\\escrow\\\\programs\\\\escrow\\\\src\\\\instructions\\\\initialize.rs\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\achal\\\\Downloads\\\\gig-proof\" -Recurse -Directory)",
+      "Bash(Select-Object -First 20)",
+      "Bash(git checkout *)"
+    ]
+  }
+}

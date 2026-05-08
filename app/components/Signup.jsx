@@ -4,22 +4,22 @@ import { useState } from "react";
 import { auth } from "../lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { useRouter } from "next/navigation";
+import { useToast } from "../context/ToastContext";
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const router = useRouter();
+  const toast = useToast();
 
   const handleSignup = async (e) => {
     e.preventDefault();
-
     try {
       await createUserWithEmailAndPassword(auth, email, password);
-      alert("Signup successful!");
-      window.location.reload();
+      router.push("/onboarding");
     } catch (error) {
       console.error(error);
-      alert(error.message);
+      toast(error.message, "error");
     }
   };
 
@@ -27,7 +27,6 @@ export default function SignupPage() {
     <div className="flex items-center justify-center">
       <form onSubmit={handleSignup} className="w-full max-w-md p-6 space-y-4 bg-base-200 rounded-xl shadow">
         <h1 className="text-2xl font-bold">Sign Up</h1>
-
         <input
           type="email"
           placeholder="Email"
@@ -36,7 +35,6 @@ export default function SignupPage() {
           onChange={(e) => setEmail(e.target.value)}
           required
         />
-
         <input
           type="password"
           placeholder="Password"
@@ -45,7 +43,6 @@ export default function SignupPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-
         <button type="submit" className="btn btn-neutral w-full">
           Create Account
         </button>

@@ -4,6 +4,7 @@ import useSettings from "./useSettings";
 import SettingsSection from "./SettingsSection";
 import ToggleRow from "./ToggleRow";
 import DeleteAccountModal from "./DeleteAccountModal";
+import { useCurrency, DISPLAY_CURRENCIES } from "../../context/CurrencyContext";
 
 export default function Settings() {
   const {
@@ -24,6 +25,8 @@ export default function Settings() {
     handleCancelDelete,
     handleDeleteAccount,
   } = useSettings();
+
+  const { defaultCurrency, updateDefaultCurrency, currencySaving } = useCurrency();
 
   if (loading) {
     return <p className="text-black/60">Loading settings...</p>;
@@ -53,6 +56,32 @@ export default function Settings() {
           >
             Logout
           </button>
+        </SettingsSection>
+
+        <SettingsSection title="Preferences">
+          <div className="flex items-center justify-between rounded-2xl bg-black/5 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-black">Default Display Currency</p>
+              <p className="text-xs text-black/50 mt-0.5">
+                Budget amounts will show a conversion in this currency.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <select
+                value={defaultCurrency}
+                onChange={(e) => updateDefaultCurrency(e.target.value)}
+                disabled={currencySaving}
+                className="rounded-xl border border-black/20 bg-white px-3 py-2 text-sm outline-none focus:border-black disabled:opacity-60"
+              >
+                {DISPLAY_CURRENCIES.map(({ code, label }) => (
+                  <option key={code} value={code}>{label}</option>
+                ))}
+              </select>
+              {currencySaving && (
+                <span className="text-xs text-black/40">Saving...</span>
+              )}
+            </div>
+          </div>
         </SettingsSection>
 
         <SettingsSection title="Notifications">
