@@ -9,6 +9,8 @@ import {
   updateDoc,
   doc,
   setDoc,
+  addDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { uploadGigRecord, arweaveUrl } from "@/app/lib/arweave";
 import { db } from "@/app/lib/firebase";
@@ -16,7 +18,7 @@ import { useAuth } from "../context/AuthContext";
 import { useCurrency, formatBudget } from "../context/CurrencyContext";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { buildReleasePaymentTx, buildRefundTx } from "@/app/lib/escrow";
+import { buildCreateEscrowTx, buildReleasePaymentTx, buildRefundTx } from "@/app/lib/escrow";
 import {
   Briefcase,
   Clock,
@@ -126,12 +128,12 @@ function StatusBadge({ status }) {
   );
 }
 
-function ProjectRow({ project, defaultCurrency, rates, userId }) {
+function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEmail }) {
   const [expanded, setExpanded] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [escrowProcessing, setEscrowProcessing] = useState(false);
   const [escrowMsg, setEscrowMsg] = useState(null);
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
   const { connection } = useConnection();
 
   const handleRelease = async () => {
@@ -183,7 +185,53 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
         }
       }
 
+      // Notify freelancer that payment has been sent
+      if (project.approvedFreelancerUid) {
+        try {
+          await addDoc(collection(db, "notifications"), {
+            type: "payment_released",
+            toUid: project.approvedFreelancerUid,
+            fromUid: userId,
+            fromName: userName,
+            fromEmail: userEmail,
+            projectId: project.id,
+            projectTitle: project.title,
+            budget: project.budget,
+            currency: project.currency || "USDC",
+            paymentTx: sig,
+            read: false,
+            createdAt: serverTimestamp(),
+          });
+        } catch (notifErr) {
+          console.warn("Payment notification failed:", notifErr.message);
+        }
+      }
+
       setEscrowMsg({ type: "success", text: "Payment released!", tx: sig });
+    } catch (e) {
+      setEscrowMsg({ type: "error", text: e.message || "Transaction failed" });
+    } finally {
+      setEscrowProcessing(false);
+    }
+  };
+
+  const handleCreateEscrow = async () => {
+    if (!publicKey || !project.approvedFreelancerWallet) return;
+    setEscrowProcessing(true);
+    setEscrowMsg(null);
+    try {
+      const freelancerKey = new PublicKey(project.approvedFreelancerWallet);
+      const amountUsdc = Math.round(Number(project.budget) * 1_000_000);
+      const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, project.id, amountUsdc);
+      const signedTx = await signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+      await connection.confirmTransaction(sig, "confirmed");
+      const escrowData = { escrowCreated: true, escrowTx: sig };
+      await Promise.all([
+        updateDoc(doc(db, "projects", project.id), escrowData),
+        updateDoc(doc(db, "users", userId, "projectsAdded", project.id), escrowData),
+      ]);
+      setEscrowMsg({ type: "success", text: "Escrow funded!", tx: sig });
     } catch (e) {
       setEscrowMsg({ type: "error", text: e.message || "Transaction failed" });
     } finally {
@@ -343,7 +391,7 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
             </div>
           )}
 
-          {project.escrowCreated && project.currency === "USDC" && (
+          {project.currency === "USDC" && (project.approvedFreelancerUid || project.escrowCreated || ["approved", "in-progress", "completed"].includes(project.status)) && (
             <div className="rounded-xl border border-black/8 bg-black/2 p-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-black/35">Escrow</p>
               {project.escrowTx && (
@@ -381,7 +429,7 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
                     View tx
                   </a>
                 </div>
-              ) : (
+              ) : project.escrowCreated ? (
                 <div className="flex gap-2">
                   <button
                     onClick={(e) => { e.stopPropagation(); handleRelease(); }}
@@ -398,6 +446,23 @@ function ProjectRow({ project, defaultCurrency, rates, userId }) {
                     Refund
                   </button>
                 </div>
+              ) : project.approvedFreelancerWallet ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-600">
+                    Escrow not yet funded — lock the payment before releasing it to the freelancer.
+                  </p>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCreateEscrow(); }}
+                    disabled={escrowProcessing || !publicKey}
+                    className="rounded-full bg-black px-4 py-1.5 text-xs font-medium text-white hover:bg-black/80 disabled:opacity-40 transition"
+                  >
+                    {escrowProcessing ? "Processing…" : "Fund Escrow"}
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-black/40">
+                  Freelancer wallet not on file — they need to connect Phantom on their Profile page before you can fund escrow.
+                </p>
               )}
             </div>
           )}
@@ -545,6 +610,8 @@ export default function WorkHistory() {
                   defaultCurrency={defaultCurrency}
                   rates={rates}
                   userId={user.uid}
+                  userName={user.displayName || user.email?.split("@")[0] || "Client"}
+                  userEmail={user.email}
                 />
               ))}
             </div>
