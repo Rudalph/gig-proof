@@ -11,7 +11,7 @@ import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { buildCreateEscrowTx } from "@/app/lib/escrow";
 import {
-  Bell, Check, X, Mail, Briefcase, CheckCircle2, XCircle, User, MapPin,
+  Bell, Check, X, Mail, Briefcase, CheckCircle2, XCircle, User, MapPin, Shield,
 } from "lucide-react";
 
 function timeAgo(ts) {
@@ -60,7 +60,7 @@ export default function Notifications() {
 
   const contactRequests = notifications.filter((n) => n.type === "contact_request");
   const myUpdates = notifications.filter((n) =>
-    n.type === "request_approved" || n.type === "request_declined"
+    n.type === "request_approved" || n.type === "request_declined" || n.type === "payment_released"
   );
 
   const unreadInbox = contactRequests.filter((n) => !n.read).length;
@@ -75,51 +75,59 @@ export default function Notifications() {
   const handleApprove = async (notif) => {
     setProcessing(notif.id);
     try {
+      // Always fetch project + freelancer data upfront
+      const [freelancerSnap, projectSnap] = await Promise.all([
+        getDoc(doc(db, "users", notif.fromUid)),
+        getDoc(doc(db, "projects", notif.projectId)),
+      ]);
+      const freelancerWallet = freelancerSnap.data()?.walletAddress || null;
+      const projectData = projectSnap.data();
+      const budget = projectData?.budget;
+      const currency = projectData?.currency;
+
+      // Always stamp the project with who was approved — regardless of escrow outcome
+      const baseApproval = {
+        status: "approved",
+        approvedFreelancerUid: notif.fromUid,
+        approvedFreelancerWallet: freelancerWallet,
+      };
+      await Promise.all([
+        updateDoc(doc(db, "projects", notif.projectId), baseApproval),
+        updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), baseApproval),
+      ]);
+
+      // Attempt escrow only if wallet connected + USDC + freelancer has a wallet
       let escrowTx = null;
-
-      // Attempt to lock USDC in escrow if Phantom is connected
-      if (publicKey) {
-        const [freelancerSnap, projectSnap] = await Promise.all([
-          getDoc(doc(db, "users", notif.fromUid)),
-          getDoc(doc(db, "projects", notif.projectId)),
-        ]);
-        const freelancerWallet = freelancerSnap.data()?.walletAddress;
-        const budget = projectSnap.data()?.budget;
-
-        if (freelancerWallet && budget && projectSnap.data()?.currency === "USDC") {
-          const freelancerKey = new PublicKey(freelancerWallet);
-          const amountUsdc = Math.round(Number(budget) * 1_000_000);
-          const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, amountUsdc);
-          const sim = await connection.simulateTransaction(tx);
-          if (sim.value.err) {
-            const errJson = JSON.stringify(sim.value.err);
-            // ProgramAccountNotFound = RPC propagation lag; let Phantom handle it
-            if (!errJson.includes("ProgramAccountNotFound")) {
-              const logs = sim.value.logs?.join("\n") || errJson;
-              setEscrowError(logs);
-              return;
-            }
-          }
-          let sig;
-          try {
-            const signedTx = await signTransaction(tx);
-            sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
-          } catch (sendErr) {
-            const msg = sendErr.message || "";
-            if (!msg.includes("rejected") && !msg.includes("User rejected")) {
-              setEscrowError(msg || "Send failed");
-            }
+      if (publicKey && freelancerWallet && budget && currency === "USDC") {
+        const freelancerKey = new PublicKey(freelancerWallet);
+        const amountUsdc = Math.round(Number(budget) * 1_000_000);
+        const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, amountUsdc);
+        const sim = await connection.simulateTransaction(tx);
+        if (sim.value.err) {
+          const errJson = JSON.stringify(sim.value.err);
+          if (!errJson.includes("ProgramAccountNotFound")) {
+            setEscrowError(sim.value.logs?.join("\n") || errJson);
             return;
           }
-          await connection.confirmTransaction(sig, "confirmed");
-          escrowTx = sig;
-
-          const escrowData = { escrowCreated: true, escrowTx: sig, approvedFreelancerWallet: freelancerWallet, approvedFreelancerUid: notif.fromUid };
-          await Promise.all([
-            updateDoc(doc(db, "projects", notif.projectId), escrowData),
-            updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
-          ]);
         }
+        let sig;
+        try {
+          const signedTx = await signTransaction(tx);
+          sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+        } catch (sendErr) {
+          const msg = sendErr.message || "";
+          if (!msg.includes("rejected") && !msg.includes("User rejected")) {
+            setEscrowError(msg || "Send failed");
+          }
+          return;
+        }
+        await connection.confirmTransaction(sig, "confirmed");
+        escrowTx = sig;
+        const escrowData = { escrowCreated: true, escrowTx: sig };
+        await Promise.all([
+          updateDoc(doc(db, "projects", notif.projectId), escrowData),
+          updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
+        ]);
       }
 
       await updateDoc(doc(db, "notifications", notif.id), { status: "approved", read: true });
@@ -134,7 +142,7 @@ export default function Notifications() {
         status: "approved",
         read: false,
         createdAt: serverTimestamp(),
-        ...(escrowTx ? { escrowTx } : {}),
+        ...(escrowTx ? { escrowTx, escrowBudget: budget } : {}),
       });
     } catch (e) {
       console.error("Approve error:", e);
@@ -385,11 +393,15 @@ export default function Notifications() {
                     </div>
                     <div
                       className={`flex items-center gap-1.5 text-sm font-semibold ${
-                        notif.type === "request_approved" ? "text-emerald-600" : "text-black/50"
+                        notif.type === "request_approved" ? "text-emerald-600"
+                        : notif.type === "payment_released" ? "text-violet-600"
+                        : "text-black/50"
                       }`}
                     >
                       {notif.type === "request_approved" ? (
                         <><CheckCircle2 size={15} /> Request approved</>
+                      ) : notif.type === "payment_released" ? (
+                        <><CheckCircle2 size={15} /> Payment received</>
                       ) : (
                         <><XCircle size={15} /> Not selected this time</>
                       )}
@@ -409,18 +421,43 @@ export default function Notifications() {
                 </div>
 
                 {notif.type === "request_approved" && (
-                  <div className="mt-2 rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
-                    <p className="text-xs text-emerald-700 font-medium mb-1.5">
-                      You can now contact the publisher directly:
-                    </p>
-                    <a
-                      href={`mailto:${notif.fromEmail}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline"
-                    >
-                      <Mail size={14} />
-                      {notif.fromEmail}
-                    </a>
+                  <div className="mt-2 space-y-2">
+                    <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+                      <p className="text-xs text-emerald-700 font-medium mb-1.5">
+                        You can now contact the publisher directly:
+                      </p>
+                      <a
+                        href={`mailto:${notif.fromEmail}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline"
+                      >
+                        <Mail size={14} />
+                        {notif.fromEmail}
+                      </a>
+                    </div>
+                    {notif.escrowTx && (
+                      <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
+                        <div className="flex items-start gap-2.5">
+                          <Shield size={14} className="text-violet-600 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-xs font-semibold text-violet-700 mb-1">
+                              {notif.escrowBudget ? `${notif.escrowBudget} USDC` : "Payment"} locked in escrow
+                            </p>
+                            <p className="text-xs text-violet-600 leading-relaxed">
+                              Your payment is secured in a Solana smart contract. Funds cannot be moved by anyone until the client releases them upon completion.
+                            </p>
+                            <a
+                              href={`https://solscan.io/tx/${notif.escrowTx}?cluster=devnet`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 underline underline-offset-2"
+                            >
+                              Verify on Solscan →
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -436,6 +473,46 @@ export default function Notifications() {
                       The publisher wasn&apos;t able to move forward at this time — no worries, it&apos;s not a reflection of your skills.
                       You&apos;re welcome to send a new request after <span className="font-medium text-black/60">12 hours</span>, or explore other opportunities in Open Jobs.
                     </p>
+                  </div>
+                )}
+
+                {notif.type === "payment_released" && (
+                  <div className="mt-2 space-y-2">
+                    <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
+                      <div className="flex items-start gap-2.5">
+                        <Shield size={14} className="text-violet-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-semibold text-violet-700 mb-1">
+                            {notif.budget} {notif.currency} paid by {notif.fromName}
+                          </p>
+                          <p className="text-xs text-violet-600 leading-relaxed">
+                            The funds have been released from escrow and sent directly to your Solana wallet. Check your balance in Phantom.
+                          </p>
+                          {notif.paymentTx && (
+                            <a
+                              href={`https://solscan.io/tx/${notif.paymentTx}?cluster=devnet`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 underline underline-offset-2"
+                            >
+                              View payment transaction →
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {notif.fromEmail && (
+                      <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+                        <p className="text-xs text-emerald-700 font-medium mb-1.5">Contact your client:</p>
+                        <a
+                          href={`mailto:${notif.fromEmail}`}
+                          className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline"
+                        >
+                          <Mail size={14} />
+                          {notif.fromEmail}
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
