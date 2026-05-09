@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Plus, X, Shuffle } from "lucide-react";
 
 import { doc, setDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
@@ -16,6 +16,57 @@ const DESCRIPTION_WORD_LIMIT = 100;
 const REQUIREMENTS_WORD_LIMIT = 150;
 const TAGS_LIMIT = 5;
 
+const RANDOM_TITLES = [
+  "Build a responsive React portfolio website",
+  "Design mobile app UI/UX mockups in Figma",
+  "Set up CI/CD pipeline with GitHub Actions",
+  "Write Python scripts for data analysis",
+  "Create a Node.js REST API with authentication",
+  "Build a Telegram bot for daily task reminders",
+  "Design a landing page for a SaaS product",
+  "Develop a browser extension for productivity",
+  "Write technical documentation for an internal SDK",
+  "Build a real-time analytics dashboard with charts",
+  "Create animated social media graphics for a brand",
+  "Set up a PostgreSQL schema with migrations",
+  "Write unit and integration tests for a React app",
+  "Build a video call feature using WebRTC",
+  "Scrape and structure product data from e-commerce sites",
+];
+
+const RANDOM_DESCRIPTIONS = [
+  "Looking for a skilled developer to build a clean responsive portfolio site. Must include an about section, project showcase, skills list, and contact form. Should be mobile-friendly and fast-loading with good SEO.",
+  "Need an experienced designer to create high-fidelity mockups for a fitness tracking mobile app. Designs should follow Material Design guidelines and include both light and dark themes.",
+  "Seeking a DevOps engineer to configure automated CI/CD pipelines for our Node.js microservices. Must cover testing, linting, Docker builds, and deployment to AWS with rollback support.",
+  "Looking for a Python developer to process weekly CSV exports, run statistical summaries, and generate charts using matplotlib. Clean well-documented code is required along with a setup guide.",
+  "Need a backend developer to build a REST API with JWT authentication, role-based access control, and auto-generated Swagger docs. Express.js and PostgreSQL stack preferred.",
+  "Require a developer to build a Telegram bot that sends configurable daily reminders and integrates with Google Calendar API to sync events. Python preferred.",
+  "Looking for someone to create a high-converting landing page with smooth animations, a pricing table, and a waitlist signup form connected to Mailchimp.",
+];
+
+const RANDOM_REQUIREMENTS = [
+  "Strong experience with React and TypeScript. Familiarity with Tailwind CSS. Must share a GitHub link to previous work. English communication required.",
+  "Proficiency in Figma with a solid portfolio of mobile UI work. Good understanding of accessibility standards. Deliver source files along with all exported assets.",
+  "Hands-on experience with GitHub Actions and Docker. Familiarity with AWS EC2 or ECS. Must document all pipeline steps and provide a runbook for the team.",
+  "Python 3.10+ experience. Solid knowledge of pandas, matplotlib, and numpy. Well-commented code and a README with full setup instructions required.",
+  "Node.js and Express.js expertise. PostgreSQL experience with Sequelize or Prisma. Must write integration tests using Jest and provide a complete OpenAPI spec.",
+  "Experience with the python-telegram-bot library. Google Calendar API integration knowledge is a plus. Deliver clean source code with inline documentation.",
+  "Proficiency in HTML, CSS, and JavaScript. Experience with animation libraries such as GSAP or Framer Motion. All pages must be fully responsive across devices.",
+];
+
+const RANDOM_TAG_SETS = [
+  ["React", "TypeScript", "Tailwind", "Next.js"],
+  ["Figma", "UI/UX", "Mobile", "Design"],
+  ["Python", "Pandas", "Data", "Automation"],
+  ["Node.js", "REST API", "PostgreSQL", "Express"],
+  ["DevOps", "Docker", "CI/CD", "AWS"],
+  ["Flutter", "Dart", "Mobile", "Firebase"],
+  ["JavaScript", "HTML", "CSS", "Animation"],
+  ["Telegram", "Bot", "Python", "API"],
+  ["React", "WebSockets", "Charts", "Dashboard"],
+  ["Scraping", "Python", "BeautifulSoup", "Data"],
+];
+
 function countWords(text) {
   return text.trim() === "" ? 0 : text.trim().split(/\s+/).length;
 }
@@ -24,13 +75,18 @@ function parseTags(value) {
   return [...new Set(value.split(",").map((t) => t.trim()).filter(Boolean))];
 }
 
-export default function AddProjects() {
+export default function AddProjects({ prefill, onPrefillConsumed }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("post");
   const { user } = useAuth();
   const toast = useToast();
 
+  const [title, setTitle] = useState("");
+  const [budget, setBudget] = useState("");
+  const [currency, setCurrency] = useState("USDC");
+  const [category, setCategory] = useState(PROFESSIONS[0]);
+  const [experienceLevel, setExperienceLevel] = useState("Any");
   const [description, setDescription] = useState("");
   const [requirements, setRequirements] = useState("");
   const [tagsInput, setTagsInput] = useState("");
@@ -38,6 +94,52 @@ export default function AddProjects() {
   const [endDate, setEndDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+  const [freelancerCount, setFreelancerCount] = useState(1);
+
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+  const generateRandom = () => {
+    setTitle(pick(RANDOM_TITLES));
+    setDescription(pick(RANDOM_DESCRIPTIONS));
+    setRequirements(pick(RANDOM_REQUIREMENTS));
+    setBudget(String(Math.round((Math.random() * 1900 + 100) / 50) * 50));
+    setCurrency(pick(["USDC", "USD", "EUR", "GBP", "INR"]));
+    setFreelancerCount(pick([1, 1, 1, 2, 3]));
+    setCategory(pick(PROFESSIONS));
+    setExperienceLevel(pick(["Any", "Beginner", "Intermediate", "Expert"]));
+    const tags = pick(RANDOM_TAG_SETS);
+    setTagsInput(tags.slice(0, Math.floor(Math.random() * 2) + 2).join(", "));
+    const todayDate = new Date();
+    const startOff = Math.floor(Math.random() * 5) + 1;
+    const endOff = Math.floor(Math.random() * 25) + 5;
+    const s = new Date(todayDate); s.setDate(todayDate.getDate() + startOff);
+    const e = new Date(s); e.setDate(s.getDate() + endOff);
+    const fmt = (d) => d.toISOString().split("T")[0];
+    setStartDate(fmt(s));
+    setEndDate(fmt(e));
+    setStartTime("");
+    setEndTime("");
+  };
+
+  useEffect(() => {
+    if (!prefill) return;
+    setTitle(prefill.title || "");
+    setDescription(prefill.description || "");
+    setRequirements(prefill.requirements || "");
+    setBudget(prefill.budget ? String(prefill.budget) : "");
+    setCurrency(prefill.currency || "USDC");
+    setCategory(prefill.category || PROFESSIONS[0]);
+    setExperienceLevel(prefill.experienceLevel || "Any");
+    setTagsInput((prefill.tags || []).join(", "));
+    setFreelancerCount(prefill.freelancerCount || 1);
+    // Leave dates blank — the original job dates are likely stale
+    setStartDate("");
+    setEndDate("");
+    setStartTime("");
+    setEndTime("");
+    setOpen(true);
+    if (onPrefillConsumed) onPrefillConsumed();
+  }, [prefill]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const descWords = countWords(description);
   const reqWords = countWords(requirements);
@@ -73,6 +175,11 @@ export default function AddProjects() {
 
   const handleClose = () => {
     setOpen(false);
+    setTitle("");
+    setBudget("");
+    setCurrency("USDC");
+    setCategory(PROFESSIONS[0]);
+    setExperienceLevel("Any");
     setDescription("");
     setRequirements("");
     setTagsInput("");
@@ -80,6 +187,7 @@ export default function AddProjects() {
     setEndDate("");
     setStartTime("");
     setEndTime("");
+    setFreelancerCount(1);
   };
 
   const handleSubmit = async (e) => {
@@ -117,6 +225,8 @@ export default function AddProjects() {
       experienceLevel: formData.get("experienceLevel"),
       tags: parseTags(tagsInput),
       requirements,
+      freelancerCount: Number(freelancerCount) || 1,
+      approvedCount: 0,
       status: "open",
       createdAt: serverTimestamp(),
       ownerId: user.uid,
@@ -202,12 +312,22 @@ export default function AddProjects() {
           <div className="w-full max-w-2xl rounded-2xl bg-white text-black shadow-2xl">
             <div className="flex items-center justify-between border-b border-black/10 p-5">
               <h2 className="text-xl font-semibold">Add Freelance Project</h2>
-              <button
-                onClick={handleClose}
-                className="rounded-full p-2 transition hover:bg-black hover:text-white"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={generateRandom}
+                  className="flex items-center gap-1.5 rounded-xl border border-black/20 px-3 py-2 text-sm font-medium text-black/60 transition hover:border-black hover:text-black"
+                >
+                  <Shuffle size={14} />
+                  Generate Random
+                </button>
+                <button
+                  onClick={handleClose}
+                  className="rounded-full p-2 transition hover:bg-black hover:text-white"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             <form onSubmit={handleSubmit} className="max-h-[80vh] space-y-4 overflow-y-auto p-5">
@@ -218,6 +338,8 @@ export default function AddProjects() {
                 <input
                   name="title"
                   required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
                   placeholder="E.g. Build a React portfolio website"
                   className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                 />
@@ -264,6 +386,8 @@ export default function AddProjects() {
                     type="number"
                     required
                     min="0"
+                    value={budget}
+                    onChange={(e) => setBudget(e.target.value)}
                     placeholder="500"
                     className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   />
@@ -276,6 +400,8 @@ export default function AddProjects() {
                   <select
                     name="currency"
                     required
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value)}
                     className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   >
                     <optgroup label="Crypto (Solana escrow)">
@@ -297,6 +423,23 @@ export default function AddProjects() {
                     </optgroup>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  How many freelancers? <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="99"
+                  value={freelancerCount}
+                  onChange={(e) => setFreelancerCount(Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                  className="w-32 rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
+                />
+                <p className="mt-1 text-xs text-black/40">
+                  {freelancerCount === 1 ? "1 freelancer needed" : `${freelancerCount} freelancers needed`}
+                </p>
               </div>
 
               <div>
@@ -387,6 +530,8 @@ export default function AddProjects() {
                   <label className="mb-1 block text-sm font-medium">Category</label>
                   <select
                     name="category"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
                     className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   >
                     {PROFESSIONS.map((p) => (
@@ -399,6 +544,8 @@ export default function AddProjects() {
                   <label className="mb-1 block text-sm font-medium">Experience Level</label>
                   <select
                     name="experienceLevel"
+                    value={experienceLevel}
+                    onChange={(e) => setExperienceLevel(e.target.value)}
                     className="w-full rounded-xl border border-black/20 bg-white text-black px-4 py-3 outline-none focus:border-black"
                   >
                     <option>Any</option>

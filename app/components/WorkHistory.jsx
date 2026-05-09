@@ -725,6 +725,7 @@ import {
   setDoc,
   addDoc,
   serverTimestamp,
+  increment,
 } from "firebase/firestore";
 import { uploadGigRecord, arweaveUrl } from "@/app/lib/arweave";
 import { db } from "@/app/lib/firebase";
@@ -815,7 +816,7 @@ function StatusBadge({ status }) {
 
 // ─── client project row (unchanged behaviour) ─────────────────────────────────
 
-function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEmail }) {
+function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEmail, onRepost }) {
   const [expanded, setExpanded] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [escrowProcessing, setEscrowProcessing] = useState(false);
@@ -915,7 +916,9 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
       const signedTx = await signTransaction(tx);
       const sig = await connection.sendRawTransaction(signedTx.serialize());
       await connection.confirmTransaction(sig, "confirmed");
-      const escrowData = { escrowCreated: true, escrowTx: sig };
+      // Escrow confirmed — count the slot as taken (covers the deferred-funding case
+      // where the client approved without a wallet connected and funds from here).
+      const escrowData = { escrowCreated: true, escrowTx: sig, approvedCount: increment(1) };
       await Promise.all([
         updateDoc(doc(db, "projects", project.id), escrowData),
         updateDoc(doc(db, "users", userId, "projectsAdded", project.id), escrowData),
@@ -940,6 +943,27 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
         updateDoc(doc(db, "projects", project.id), { status: "cancelled", refundTx: sig, escrowCreated: false }),
         updateDoc(doc(db, "users", userId, "projectsAdded", project.id), { status: "cancelled", refundTx: sig, escrowCreated: false }),
       ]);
+      // Notify the freelancer that the escrow was refunded
+      if (project.approvedFreelancerUid) {
+        try {
+          await addDoc(collection(db, "notifications"), {
+            type: "escrow_refunded",
+            toUid: project.approvedFreelancerUid,
+            fromUid: userId,
+            fromName: userName,
+            fromEmail: userEmail,
+            projectId: project.id,
+            projectTitle: project.title,
+            budget: project.budget,
+            currency: project.currency || "USDC",
+            refundTx: sig,
+            read: false,
+            createdAt: serverTimestamp(),
+          });
+        } catch (notifErr) {
+          console.warn("Refund notification failed:", notifErr.message);
+        }
+      }
       setEscrowMsg({ type: "success", text: "Refund complete!", tx: sig });
     } catch (e) {
       setEscrowMsg({ type: "error", text: e.message || "Transaction failed" });
@@ -1058,10 +1082,12 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
             </div>
           )}
 
-          {project.currency === "USDC" && (project.approvedFreelancerUid || project.escrowCreated || ["approved", "in-progress", "completed"].includes(project.status)) && (
+          {project.currency === "USDC" && (project.approvedFreelancerUid || project.escrowCreated || project.refundTx || ["approved", "in-progress", "completed"].includes(project.status)) && (
             <div className="rounded-xl border border-black/8 bg-black/2 p-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-black/35">Escrow</p>
-              {project.escrowTx && (
+
+              {/* Only show the original escrow lock link when funds haven't been returned */}
+              {project.escrowTx && !project.refundTx && (
                 <a
                   href={`https://solscan.io/tx/${project.escrowTx}?cluster=devnet`}
                   target="_blank"
@@ -1072,7 +1098,9 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
                   USDC locked · view on Solscan
                 </a>
               )}
-              {escrowMsg && !project.paymentReleasedTx && (
+
+              {/* Local tx feedback — hide once the project doc reflects the final state */}
+              {escrowMsg && !project.paymentReleasedTx && !project.refundTx && (
                 <div className={`text-xs px-3 py-2 rounded-lg ${escrowMsg.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
                   {escrowMsg.text}
                   {escrowMsg.tx && (
@@ -1082,7 +1110,32 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
                   )}
                 </div>
               )}
-              {project.paymentReleasedTx ? (
+
+              {project.refundTx ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-red-500">
+                    <CheckCircle2 size={13} />
+                    Refund complete — funds returned to your wallet ·{" "}
+                    <a
+                      href={`https://solscan.io/tx/${project.refundTx}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      View tx
+                    </a>
+                  </div>
+                  {onRepost && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onRepost(project); }}
+                      className="rounded-full border border-black/20 bg-white px-4 py-1.5 text-xs font-medium text-black hover:bg-black hover:text-white transition"
+                    >
+                      Re-post same job
+                    </button>
+                  )}
+                </div>
+              ) : project.paymentReleasedTx ? (
                 <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
                   <CheckCircle2 size={13} />
                   Payment released ·{" "}
@@ -1241,13 +1294,18 @@ function TimelineEntry({ gig, uid, isLast }) {
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-export default function WorkHistory() {
+export default function WorkHistory({ setActivePage, setJobPrefill }) {
   const { user } = useAuth();
   const { defaultCurrency, rates } = useCurrency();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("client");
   const [completedGigs, setCompletedGigs] = useState([]);
+
+  const handleRepost = (project) => {
+    if (setJobPrefill) setJobPrefill(project);
+    if (setActivePage) setActivePage("Hire Talent");
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -1346,6 +1404,7 @@ export default function WorkHistory() {
                   userId={user.uid}
                   userName={user.displayName || user.email?.split("@")[0] || "Client"}
                   userEmail={user.email}
+                  onRepost={handleRepost}
                 />
               ))}
             </div>

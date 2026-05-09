@@ -338,6 +338,8 @@ export default function OpenJobs() {
       if (selectedCategories.size > 0 && !selectedCategories.has(j.category)) return false;
       if (selectedTags.size > 0 && !(j.tags || []).some((t) => selectedTags.has(t))) return false;
       if (selectedLevels.size > 0 && !selectedLevels.has(j.experienceLevel)) return false;
+      // Hide jobs where all freelancer spots are filled
+      if ((j.approvedCount || 0) >= (j.freelancerCount || 1)) return false;
       return true;
     })
     .sort((a, b) => {
@@ -545,11 +547,23 @@ export default function OpenJobs() {
 
                 <div className="mb-3">
                   <h3 className="text-lg font-semibold leading-snug">{job.title}</h3>
-                  {isOwn && (
-                    <span className="mt-1 inline-block rounded-full bg-black/10 px-2.5 py-1 text-xs font-medium text-black/60">
-                      Your published project
-                    </span>
-                  )}
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {isOwn && (
+                      <span className="rounded-full bg-black/10 px-2.5 py-1 text-xs font-medium text-black/60">
+                        Your published project
+                      </span>
+                    )}
+                    {(job.freelancerCount || 1) > 1 && (() => {
+                      const approved = job.approvedCount || 0;
+                      const total = job.freelancerCount;
+                      const remaining = total - approved;
+                      return (
+                        <span className="rounded-full bg-violet-50 border border-violet-200 px-2.5 py-1 text-xs font-medium text-violet-700">
+                          {approved > 0 ? `${approved}/${total} approved · ${remaining} spot${remaining !== 1 ? "s" : ""} left` : `${total} spots available`}
+                        </span>
+                      );
+                    })()}
+                  </div>
                 </div>
                 <p className="mb-4 line-clamp-3 text-sm text-black/60">{job.description}</p>
                 <div className="mb-4 flex flex-wrap gap-2">
@@ -587,11 +601,23 @@ export default function OpenJobs() {
             <div className="flex items-start justify-between border-b border-black/10 p-5">
               <div>
                 <h2 className="text-xl font-semibold">{selectedJob.title}</h2>
-                {selectedJob.ownerId === user?.uid && (
-                  <span className="mt-1.5 inline-block rounded-full bg-black/10 px-3 py-1 text-xs font-medium text-black/60">
-                    Your published project
-                  </span>
-                )}
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {selectedJob.ownerId === user?.uid && (
+                    <span className="rounded-full bg-black/10 px-3 py-1 text-xs font-medium text-black/60">
+                      Your published project
+                    </span>
+                  )}
+                  {(selectedJob.freelancerCount || 1) > 1 && (() => {
+                    const approved = selectedJob.approvedCount || 0;
+                    const total = selectedJob.freelancerCount;
+                    const remaining = total - approved;
+                    return (
+                      <span className="rounded-full bg-violet-50 border border-violet-200 px-3 py-1 text-xs font-medium text-violet-700">
+                        {approved > 0 ? `${approved}/${total} approved · ${remaining} spot${remaining !== 1 ? "s" : ""} left` : `${total} spots available`}
+                      </span>
+                    );
+                  })()}
+                </div>
               </div>
               <button
                 onClick={() => setSelectedJob(null)}

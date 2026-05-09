@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   collection, query, where, onSnapshot,
-  updateDoc, doc, addDoc, serverTimestamp, getDoc,
+  updateDoc, doc, addDoc, serverTimestamp, getDoc, increment, deleteDoc,
 } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
@@ -11,8 +11,16 @@ import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { buildCreateEscrowTx } from "@/app/lib/escrow";
 import {
-  Bell, Check, X, Mail, Briefcase, CheckCircle2, XCircle, User, MapPin, Shield,
+  Bell, Check, X, Mail, Briefcase, CheckCircle2, XCircle, User, MapPin,
+  Shield, AlertTriangle, ExternalLink, ChevronLeft, Trash2,
 } from "lucide-react";
+
+function formatDate(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
 
 function timeAgo(ts) {
   if (!ts) return "";
@@ -25,26 +33,291 @@ function timeAgo(ts) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+function NotificationCard({ notif, processing, profileLoading, onApprove, onDeclineOpen, onMarkRead, onViewProfile }) {
+  return (
+    <div
+      className={`rounded-2xl border p-5 transition ${
+        !notif.read ? "border-black/20 bg-white" : "border-black/8 bg-black/[0.01]"
+      }`}
+    >
+      {/* Card header */}
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            {!notif.read && <span className="h-2 w-2 rounded-full bg-black shrink-0" />}
+            {notif.type === "contact_request" ? (
+              <>
+                <p className="text-sm font-semibold text-black">{notif.fromName || notif.fromEmail}</p>
+                <p className="text-xs text-black/40">is interested in this job</p>
+              </>
+            ) : (
+              <div
+                className={`flex items-center gap-1.5 text-sm font-semibold ${
+                  notif.type === "request_approved" ? "text-emerald-600"
+                  : notif.type === "payment_released" ? "text-violet-600"
+                  : notif.type === "escrow_refunded" ? "text-red-500"
+                  : "text-black/50"
+                }`}
+              >
+                {notif.type === "request_approved" ? (
+                  <><CheckCircle2 size={15} /> Request approved</>
+                ) : notif.type === "payment_released" ? (
+                  <><CheckCircle2 size={15} /> Payment received</>
+                ) : notif.type === "escrow_refunded" ? (
+                  <><AlertTriangle size={15} /> Escrow funds taken back</>
+                ) : (
+                  <><XCircle size={15} /> Not selected this time</>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span className="text-xs text-black/35">{timeAgo(notif.createdAt)}</span>
+          {!notif.read && notif.type !== "contact_request" && (
+            <button
+              onClick={() => onMarkRead(notif.id)}
+              className="rounded-lg bg-black px-3 py-1 text-xs font-medium text-white transition hover:bg-black/75"
+            >
+              Mark as read
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* contact_request body */}
+      {notif.type === "contact_request" && (
+        <>
+          {notif.message && (
+            <p className="mb-3 rounded-xl bg-black/4 px-4 py-3 text-sm text-black/70 leading-relaxed">
+              &ldquo;{notif.message}&rdquo;
+            </p>
+          )}
+          <div className="mb-4">
+            <button
+              onClick={() => onViewProfile(notif)}
+              disabled={profileLoading}
+              className="flex items-center gap-1.5 rounded-lg border border-black/15 px-3 py-1.5 text-xs font-medium text-black/70 transition hover:border-black hover:text-black disabled:opacity-50"
+            >
+              <User size={12} />
+              View Profile
+            </button>
+          </div>
+          {notif.status === "pending" ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => onApprove(notif)}
+                disabled={processing === notif.id}
+                className="flex items-center gap-1.5 rounded-xl bg-black px-4 py-2 text-xs font-medium text-white transition hover:bg-black/80 disabled:opacity-50"
+              >
+                <Check size={13} />
+                Approve
+              </button>
+              <button
+                onClick={() => onDeclineOpen(notif)}
+                disabled={processing === notif.id}
+                className="flex items-center gap-1.5 rounded-xl border border-black/15 px-4 py-2 text-xs font-medium text-black/60 transition hover:border-red-300 hover:text-red-500 disabled:opacity-50"
+              >
+                <X size={13} />
+                Decline
+              </button>
+              {!notif.read && (
+                <button
+                  onClick={() => onMarkRead(notif.id)}
+                  className="ml-auto rounded-lg bg-black px-3 py-1 text-xs font-medium text-white transition hover:bg-black/75"
+                >
+                  Mark as read
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <div
+                className={`flex items-center gap-1.5 text-xs font-medium ${
+                  notif.status === "approved" ? "text-emerald-600" : "text-red-500"
+                }`}
+              >
+                {notif.status === "approved" ? (
+                  <><CheckCircle2 size={13} /> Approved</>
+                ) : (
+                  <><XCircle size={13} /> Declined</>
+                )}
+              </div>
+              {!notif.read && (
+                <button
+                  onClick={() => onMarkRead(notif.id)}
+                  className="rounded-lg bg-black px-3 py-1 text-xs font-medium text-white transition hover:bg-black/75"
+                >
+                  Mark as read
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* request_approved body */}
+      {notif.type === "request_approved" && (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+            <p className="text-xs text-emerald-700 font-medium mb-1.5">
+              You can now contact the publisher directly:
+            </p>
+            <a
+              href={`mailto:${notif.fromEmail}`}
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline"
+            >
+              <Mail size={14} />
+              {notif.fromEmail}
+            </a>
+          </div>
+          {notif.escrowTx && (
+            <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
+              <div className="flex items-start gap-2.5">
+                <Shield size={14} className="text-violet-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-violet-700 mb-1">
+                    {notif.escrowBudget ? `${notif.escrowBudget} USDC` : "Payment"} locked in escrow
+                  </p>
+                  <p className="text-xs text-violet-600 leading-relaxed">
+                    Your payment is secured in a Solana smart contract. Funds cannot be moved by anyone until the client releases them upon completion.
+                  </p>
+                  <a
+                    href={`https://solscan.io/tx/${notif.escrowTx}?cluster=devnet`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 underline underline-offset-2"
+                  >
+                    Verify on Solscan →
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* request_declined body */}
+      {notif.type === "request_declined" && (
+        <div className="mt-2 space-y-2">
+          {notif.declineReason && (
+            <div className="rounded-xl bg-black/4 px-4 py-3">
+              <p className="text-xs text-black/40 mb-1">Reason given</p>
+              <p className="text-sm text-black/70 leading-relaxed">&ldquo;{notif.declineReason}&rdquo;</p>
+            </div>
+          )}
+          <p className="text-xs text-black/40 leading-relaxed">
+            The publisher wasn&apos;t able to move forward at this time — no worries, it&apos;s not a reflection of your skills.
+            You&apos;re welcome to send a new request after <span className="font-medium text-black/60">12 hours</span>, or explore other opportunities in Open Jobs.
+          </p>
+        </div>
+      )}
+
+      {/* payment_released body */}
+      {notif.type === "payment_released" && (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <Shield size={14} className="text-violet-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-violet-700 mb-1">
+                  {notif.budget} {notif.currency} paid by {notif.fromName}
+                </p>
+                <p className="text-xs text-violet-600 leading-relaxed">
+                  The funds have been released from escrow and sent directly to your Solana wallet. Check your balance in Phantom.
+                </p>
+                {notif.paymentTx && (
+                  <a
+                    href={`https://solscan.io/tx/${notif.paymentTx}?cluster=devnet`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 underline underline-offset-2"
+                  >
+                    View payment transaction →
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+          {notif.fromEmail && (
+            <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+              <p className="text-xs text-emerald-700 font-medium mb-1.5">Contact your client:</p>
+              <a
+                href={`mailto:${notif.fromEmail}`}
+                className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline"
+              >
+                <Mail size={14} />
+                {notif.fromEmail}
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* escrow_refunded body */}
+      {notif.type === "escrow_refunded" && (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle size={14} className="text-red-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-red-600 mb-1">
+                  {notif.budget && notif.currency ? `${notif.budget} ${notif.currency} — ` : ""}Escrow funds reclaimed by client
+                </p>
+                <p className="text-xs text-red-500 leading-relaxed">
+                  The client has withdrawn the funds from the escrow contract back to their wallet. If you believe this is a mistake or have questions about the work you delivered, reach out to them directly.
+                </p>
+                {notif.refundTx && (
+                  <a
+                    href={`https://solscan.io/tx/${notif.refundTx}?cluster=devnet`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-red-500 underline underline-offset-2"
+                  >
+                    <ExternalLink size={11} />
+                    View refund transaction
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+          {notif.fromEmail && (
+            <a
+              href={`mailto:${notif.fromEmail}`}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-black/20 px-4 py-2.5 text-sm font-medium text-black transition hover:bg-black hover:text-white"
+            >
+              <Mail size={15} />
+              Mail the client
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Notifications() {
   const { user } = useAuth();
-  const { publicKey, sendTransaction, signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useWallet();
   const { connection } = useConnection();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("inbox");
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [deleteWarning, setDeleteWarning] = useState(null);
+  const [bulkProcessing, setBulkProcessing] = useState(null);
   const [processing, setProcessing] = useState(null);
   const [declineModal, setDeclineModal] = useState(null);
   const [declineReason, setDeclineReason] = useState("");
   const [viewProfile, setViewProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [escrowError, setEscrowError] = useState(null);
+  const [projectDetails, setProjectDetails] = useState({});
+  const [activeSection, setActiveSection] = useState("from_freelancers");
 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, "notifications"),
-      where("toUid", "==", user.uid)
-    );
+    const q = query(collection(db, "notifications"), where("toUid", "==", user.uid));
     return onSnapshot(q, (snap) => {
       const data = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
@@ -58,13 +331,57 @@ export default function Notifications() {
     });
   }, [user]);
 
-  const contactRequests = notifications.filter((n) => n.type === "contact_request");
-  const myUpdates = notifications.filter((n) =>
-    n.type === "request_approved" || n.type === "request_declined" || n.type === "payment_released"
-  );
+  // Fetch project metadata for all unique projectIds in notifications
+  const projectIdsKey = [...new Set(
+    notifications.map((n) => n.projectId).filter(Boolean)
+  )].sort().join(",");
 
-  const unreadInbox = contactRequests.filter((n) => !n.read).length;
-  const unreadUpdates = myUpdates.filter((n) => !n.read).length;
+  useEffect(() => {
+    if (!projectIdsKey) return;
+    const ids = projectIdsKey.split(",");
+    Promise.all(ids.map((id) => getDoc(doc(db, "projects", id)))).then((snaps) => {
+      const details = {};
+      snaps.forEach((snap) => { if (snap.exists()) details[snap.id] = snap.data(); });
+      setProjectDetails((prev) => ({ ...prev, ...details }));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectIdsKey]);
+
+  // Group by projectId
+  const projectGroups = notifications.reduce((acc, notif) => {
+    const pid = notif.projectId || "__no_project__";
+    if (!acc[pid]) {
+      acc[pid] = {
+        projectId: pid,
+        projectTitle: notif.projectTitle || "Untitled Project",
+        notifications: [],
+      };
+    }
+    acc[pid].notifications.push(notif);
+    return acc;
+  }, {});
+
+  const projectList = Object.values(projectGroups).sort((a, b) => {
+    const latestA = Math.max(...a.notifications.map((n) => n.createdAt?.toDate?.()?.getTime() || 0));
+    const latestB = Math.max(...b.notifications.map((n) => n.createdAt?.toDate?.()?.getTime() || 0));
+    return latestB - latestA;
+  });
+
+  const CLIENT_TYPES = ["request_approved", "request_declined", "payment_released", "escrow_refunded"];
+  const fromFreelancersList = projectList.filter((g) =>
+    g.notifications.some((n) => n.type === "contact_request")
+  );
+  const fromClientsList = projectList.filter((g) =>
+    g.notifications.some((n) => CLIENT_TYPES.includes(n.type))
+  );
+  const visibleList = activeSection === "from_freelancers" ? fromFreelancersList : fromClientsList;
+
+  const unreadFromFreelancers = notifications.filter(
+    (n) => n.type === "contact_request" && !n.read
+  ).length;
+  const unreadFromClients = notifications.filter(
+    (n) => CLIENT_TYPES.includes(n.type) && !n.read
+  ).length;
 
   const markRead = async (notifId) => {
     try {
@@ -72,10 +389,39 @@ export default function Notifications() {
     } catch {}
   };
 
+  const handleMarkAllRead = async (projectId) => {
+    setBulkProcessing(projectId + "_read");
+    try {
+      const unread = projectId === "__all__"
+        ? notifications.filter((n) => !n.read)
+        : notifications.filter((n) => (n.projectId || "__no_project__") === projectId && !n.read);
+      await Promise.all(unread.map((n) => updateDoc(doc(db, "notifications", n.id), { read: true })));
+    } catch (e) {
+      console.error("Mark all read error:", e);
+    } finally {
+      setBulkProcessing(null);
+    }
+  };
+
+  const handleDeleteAll = async (projectId) => {
+    setBulkProcessing(projectId + "_delete");
+    try {
+      const toDelete = projectId === "__all__"
+        ? notifications
+        : notifications.filter((n) => (n.projectId || "__no_project__") === projectId);
+      await Promise.all(toDelete.map((n) => deleteDoc(doc(db, "notifications", n.id))));
+      setSelectedProjectId(null);
+      setDeleteWarning(null);
+    } catch (e) {
+      console.error("Delete all error:", e);
+    } finally {
+      setBulkProcessing(null);
+    }
+  };
+
   const handleApprove = async (notif) => {
     setProcessing(notif.id);
     try {
-      // Always fetch project + freelancer data upfront
       const [freelancerSnap, projectSnap] = await Promise.all([
         getDoc(doc(db, "users", notif.fromUid)),
         getDoc(doc(db, "projects", notif.projectId)),
@@ -85,20 +431,21 @@ export default function Notifications() {
       const budget = projectData?.budget;
       const currency = projectData?.currency;
 
-      // Always stamp the project with who was approved — regardless of escrow outcome
+      const willAttemptEscrow = !!(publicKey && freelancerWallet && budget && currency === "USDC");
+
       const baseApproval = {
         status: "approved",
         approvedFreelancerUid: notif.fromUid,
         approvedFreelancerWallet: freelancerWallet,
+        ...(!willAttemptEscrow ? { approvedCount: increment(1) } : {}),
       };
       await Promise.all([
         updateDoc(doc(db, "projects", notif.projectId), baseApproval),
         updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), baseApproval),
       ]);
 
-      // Attempt escrow only if wallet connected + USDC + freelancer has a wallet
       let escrowTx = null;
-      if (publicKey && freelancerWallet && budget && currency === "USDC") {
+      if (willAttemptEscrow) {
         const freelancerKey = new PublicKey(freelancerWallet);
         const amountUsdc = Math.round(Number(budget) * 1_000_000);
         const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, amountUsdc);
@@ -123,7 +470,7 @@ export default function Notifications() {
         }
         await connection.confirmTransaction(sig, "confirmed");
         escrowTx = sig;
-        const escrowData = { escrowCreated: true, escrowTx: sig };
+        const escrowData = { escrowCreated: true, escrowTx: sig, approvedCount: increment(1) };
         await Promise.all([
           updateDoc(doc(db, "projects", notif.projectId), escrowData),
           updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
@@ -154,10 +501,7 @@ export default function Notifications() {
   const handleDecline = async (notif, reason = "") => {
     setProcessing(notif.id);
     try {
-      await updateDoc(doc(db, "notifications", notif.id), {
-        status: "declined",
-        read: true,
-      });
+      await updateDoc(doc(db, "notifications", notif.id), { status: "declined", read: true });
       const payload = {
         type: "request_declined",
         toUid: notif.fromUid,
@@ -179,18 +523,11 @@ export default function Notifications() {
     }
   };
 
-
   const handleViewProfile = async (notif) => {
-    // Use profile snapshot embedded at send-time (no extra Firestore read needed)
     if (notif.senderProfile) {
-      setViewProfile({
-        uid: notif.fromUid,
-        name: notif.fromName,
-        ...notif.senderProfile,
-      });
+      setViewProfile({ uid: notif.fromUid, name: notif.fromName, ...notif.senderProfile });
       return;
     }
-    // Fallback for older notifications without embedded profile
     setProfileLoading(true);
     try {
       const snap = await getDoc(doc(db, "users", notif.fromUid));
@@ -207,42 +544,70 @@ export default function Notifications() {
 
   if (!user) return null;
 
+  const selectedGroup = selectedProjectId ? projectGroups[selectedProjectId] : null;
+
   return (
     <div className="max-w-3xl space-y-6">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-black/35 mb-1">Activity</p>
-        <h1 className="text-2xl font-bold text-black">Notifications</h1>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-black/35 mb-1">Activity</p>
+          <h1 className="text-2xl font-bold text-black">Notifications</h1>
+        </div>
+        {!selectedProjectId && notifications.length > 0 && (
+          <div className="flex gap-2 shrink-0 mt-1">
+            {notifications.some((n) => !n.read) && (
+              <button
+                onClick={() => handleMarkAllRead("__all__")}
+                disabled={bulkProcessing === "__all___read"}
+                className="flex items-center gap-1.5 rounded-xl border border-black/15 px-3 py-1.5 text-xs font-medium text-black/60 transition hover:border-black hover:text-black disabled:opacity-50"
+              >
+                <Check size={13} />
+                Mark all read
+              </button>
+            )}
+            <button
+              onClick={() => setDeleteWarning("__all__")}
+              disabled={!!bulkProcessing}
+              className="flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+            >
+              <Trash2 size={13} />
+              Delete all
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-2xl bg-black/5 p-1 w-fit">
-        <button
-          onClick={() => setActiveTab("inbox")}
-          className={`rounded-xl px-5 py-2 text-sm font-medium transition ${
-            activeTab === "inbox" ? "bg-white text-black shadow-sm" : "text-black/50 hover:text-black"
-          }`}
-        >
-          Inbox
-          {unreadInbox > 0 && (
-            <span className="ml-2 rounded-full bg-black text-white text-xs px-1.5 py-0.5">
-              {unreadInbox}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab("updates")}
-          className={`rounded-xl px-5 py-2 text-sm font-medium transition ${
-            activeTab === "updates" ? "bg-white text-black shadow-sm" : "text-black/50 hover:text-black"
-          }`}
-        >
-          My Requests
-          {unreadUpdates > 0 && (
-            <span className="ml-2 rounded-full bg-black text-white text-xs px-1.5 py-0.5">
-              {unreadUpdates}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* Section tabs — only show on grid view */}
+      {!selectedProjectId && (
+        <div className="flex gap-1 rounded-2xl bg-black/5 p-1 w-fit">
+          <button
+            onClick={() => { setActiveSection("from_freelancers"); setSelectedProjectId(null); }}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${
+              activeSection === "from_freelancers" ? "bg-white text-black shadow-sm" : "text-black/50 hover:text-black"
+            }`}
+          >
+            From Freelancers
+            {unreadFromFreelancers > 0 && (
+              <span className="rounded-full bg-black text-white text-xs px-1.5 py-0.5 leading-none">
+                {unreadFromFreelancers}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => { setActiveSection("from_clients"); setSelectedProjectId(null); }}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${
+              activeSection === "from_clients" ? "bg-white text-black shadow-sm" : "text-black/50 hover:text-black"
+            }`}
+          >
+            From Clients
+            {unreadFromClients > 0 && (
+              <span className="rounded-full bg-black text-white text-xs px-1.5 py-0.5 leading-none">
+                {unreadFromClients}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">
@@ -250,276 +615,244 @@ export default function Notifications() {
             <div key={i} className="h-24 animate-pulse rounded-2xl bg-black/5" />
           ))}
         </div>
-      ) : activeTab === "inbox" ? (
-        <div className="space-y-3">
-          {contactRequests.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-black/15 p-12 text-center">
-              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-black/5">
-                <Bell size={24} className="text-black/25" />
-              </div>
-              <p className="font-semibold text-black/50">No contact requests yet</p>
-              <p className="mt-1 text-sm text-black/35">
-                When someone is interested in your job, you&apos;ll see it here.
-              </p>
+      ) : !selectedProjectId ? (
+        /* ── Project tile grid ── */
+        visibleList.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-black/15 p-12 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-black/5">
+              <Bell size={24} className="text-black/25" />
             </div>
-          ) : (
-            contactRequests.map((notif) => (
-              <div
-                key={notif.id}
-                className={`rounded-2xl border p-5 transition ${
-                  !notif.read ? "border-black/20 bg-white" : "border-black/8 bg-black/[0.01]"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      {!notif.read && (
-                        <span className="h-2 w-2 rounded-full bg-black shrink-0" />
-                      )}
-                      <p className="text-sm font-semibold text-black">
-                        {notif.fromName || notif.fromEmail}
-                      </p>
-                      <p className="text-xs text-black/40">is interested in your job</p>
+            <p className="font-semibold text-black/50">
+              {activeSection === "from_freelancers" ? "No freelancer requests yet" : "No client responses yet"}
+            </p>
+            <p className="mt-1 text-sm text-black/35">
+              {activeSection === "from_freelancers"
+                ? "When someone is interested in your posted jobs, it will show here."
+                : "Responses to jobs you've applied for will show here."}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {visibleList.map((group) => {
+              const unreadCount = group.notifications.filter((n) => !n.read).length;
+              const latest = group.notifications[0];
+              const proj = projectDetails[group.projectId];
+              const pendingRequests = group.notifications.filter(
+                (n) => n.type === "contact_request" && n.status === "pending"
+              ).length;
+              const approvedCount = group.notifications.filter(
+                (n) => n.type === "contact_request" && n.status === "approved"
+              ).length;
+              const declinedCount = group.notifications.filter(
+                (n) => n.type === "contact_request" && n.status === "declined"
+              ).length;
+              const hasPayment = group.notifications.some((n) => n.type === "payment_released");
+              const hasRefund = group.notifications.some((n) => n.type === "escrow_refunded");
+              const hasApproval = group.notifications.some((n) => n.type === "request_approved");
+              return (
+                <div
+                  key={group.projectId}
+                  onClick={() => setSelectedProjectId(group.projectId)}
+                  className="cursor-pointer rounded-2xl border border-black/12 bg-white p-5 transition hover:border-black/25 hover:shadow-sm select-none"
+                >
+                  {/* Top row: icon + unread badge + delete */}
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-black/5">
+                      <Briefcase size={18} className="text-black/50" />
                     </div>
-                    <p className="text-xs text-black/50 flex items-center gap-1">
-                      <Briefcase size={11} />
-                      {notif.projectTitle}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      {unreadCount > 0 && (
+                        <span className="rounded-full bg-black text-white text-xs font-semibold px-2 py-0.5 min-w-[20px] text-center">
+                          {unreadCount}
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDeleteWarning(group.projectId); }}
+                        title="Delete all notifications for this project"
+                        className="cursor-pointer rounded-lg p-1.5 text-black/25 transition hover:bg-red-50 hover:text-red-500"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
-                  <span className="shrink-0 text-xs text-black/35">{timeAgo(notif.createdAt)}</span>
-                </div>
 
-                {notif.message && (
-                  <p className="mb-3 rounded-xl bg-black/4 px-4 py-3 text-sm text-black/70 leading-relaxed">
-                    &ldquo;{notif.message}&rdquo;
+                  {/* Title */}
+                  <p className="text-sm font-semibold text-black leading-snug mb-2">
+                    {group.projectTitle}
                   </p>
-                )}
 
-                <div className="mb-4">
-                  <button
-                    onClick={() => handleViewProfile(notif)}
-                    disabled={profileLoading}
-                    className="flex items-center gap-1.5 rounded-lg border border-black/15 px-3 py-1.5 text-xs font-medium text-black/70 transition hover:border-black hover:text-black disabled:opacity-50"
-                  >
-                    <User size={12} />
-                    View Profile
-                  </button>
-                </div>
-
-                {notif.status === "pending" ? (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={() => handleApprove(notif)}
-                      disabled={processing === notif.id}
-                      className="flex items-center gap-1.5 rounded-xl bg-black px-4 py-2 text-xs font-medium text-white transition hover:bg-black/80 disabled:opacity-50"
-                    >
-                      <Check size={13} />
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => { setDeclineModal(notif); setDeclineReason(""); }}
-                      disabled={processing === notif.id}
-                      className="flex items-center gap-1.5 rounded-xl border border-black/15 px-4 py-2 text-xs font-medium text-black/60 transition hover:border-red-300 hover:text-red-500 disabled:opacity-50"
-                    >
-                      <X size={13} />
-                      Decline
-                    </button>
-                    {!notif.read && (
-                      <button
-                        onClick={() => markRead(notif.id)}
-                        className="ml-auto rounded-lg bg-black px-3 py-1 text-xs font-medium text-white transition hover:bg-black/75"
-                      >
-                        Mark as read
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between gap-2">
-                    <div
-                      className={`flex items-center gap-1.5 text-xs font-medium ${
-                        notif.status === "approved" ? "text-emerald-600" : "text-red-500"
-                      }`}
-                    >
-                      {notif.status === "approved" ? (
-                        <><CheckCircle2 size={13} /> Approved</>
-                      ) : (
-                        <><XCircle size={13} /> Declined</>
+                  {/* Project metadata from Firestore */}
+                  {proj && (
+                    <div className="mb-2 space-y-1">
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-black/50">
+                        {proj.budget && proj.currency && (
+                          <span className="font-semibold text-black/70">{proj.budget} {proj.currency}</span>
+                        )}
+                        {proj.category && <span>{proj.category}</span>}
+                        {proj.experienceLevel && proj.experienceLevel !== "Any" && (
+                          <span>{proj.experienceLevel}</span>
+                        )}
+                      </div>
+                      {(proj.endDate || proj.startDate) && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-black/40">
+                          {proj.startDate && <span>Start: {formatDate(proj.startDate)}</span>}
+                          {proj.endDate && <span>Deadline: {formatDate(proj.endDate)}</span>}
+                        </div>
+                      )}
+                      {proj.freelancerCount > 1 && (
+                        <p className="text-xs text-black/40">
+                          {proj.approvedCount || 0}/{proj.freelancerCount} spots filled
+                        </p>
                       )}
                     </div>
-                    {!notif.read && (
-                      <button
-                        onClick={() => markRead(notif.id)}
-                        className="rounded-lg bg-black px-3 py-1 text-xs font-medium text-white transition hover:bg-black/75"
-                      >
-                        Mark as read
-                      </button>
+                  )}
+
+                  {/* Activity summary chips */}
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {pendingRequests > 0 && (
+                      <span className="rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs px-2 py-0.5 font-medium">
+                        {pendingRequests} pending
+                      </span>
+                    )}
+                    {approvedCount > 0 && (
+                      <span className="rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs px-2 py-0.5 font-medium">
+                        {approvedCount} approved
+                      </span>
+                    )}
+                    {declinedCount > 0 && (
+                      <span className="rounded-full bg-black/5 border border-black/10 text-black/50 text-xs px-2 py-0.5">
+                        {declinedCount} declined
+                      </span>
+                    )}
+                    {hasPayment && (
+                      <span className="rounded-full bg-violet-50 border border-violet-100 text-violet-700 text-xs px-2 py-0.5 font-medium">
+                        Payment received
+                      </span>
+                    )}
+                    {hasApproval && !hasPayment && (
+                      <span className="rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs px-2 py-0.5 font-medium">
+                        Request approved
+                      </span>
+                    )}
+                    {hasRefund && (
+                      <span className="rounded-full bg-red-50 border border-red-100 text-red-500 text-xs px-2 py-0.5 font-medium">
+                        Funds refunded
+                      </span>
                     )}
                   </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
+
+                  <p className="text-xs text-black/35">
+                    {group.notifications.length} notification{group.notifications.length !== 1 ? "s" : ""}
+                    {latest?.createdAt && ` · ${timeAgo(latest.createdAt)}`}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )
       ) : (
-        <div className="space-y-3">
-          {myUpdates.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-black/15 p-12 text-center">
-              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-black/5">
-                <Mail size={24} className="text-black/25" />
-              </div>
-              <p className="font-semibold text-black/50">No updates yet</p>
-              <p className="mt-1 text-sm text-black/35">
-                Responses to your contact requests will appear here.
+        /* ── Project detail view ── */
+        <div className="space-y-4">
+          <button
+            onClick={() => setSelectedProjectId(null)}
+            className="flex items-center gap-1.5 text-sm font-medium text-black/55 transition hover:text-black"
+          >
+            <ChevronLeft size={16} />
+            All projects
+          </button>
+
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-bold text-black">{selectedGroup?.projectTitle}</h2>
+              <p className="text-xs text-black/40 mt-0.5">
+                {selectedGroup?.notifications.length} notification{selectedGroup?.notifications.length !== 1 ? "s" : ""}
               </p>
             </div>
-          ) : (
-            myUpdates.map((notif) => (
-              <div
-                key={notif.id}
-                className={`rounded-2xl border p-5 transition ${
-                  !notif.read ? "border-black/20 bg-white" : "border-black/8 bg-black/[0.01]"
-                }`}
+            <div className="flex gap-2 shrink-0">
+              {selectedGroup?.notifications.some((n) => !n.read) && (
+                <button
+                  onClick={() => handleMarkAllRead(selectedProjectId)}
+                  disabled={bulkProcessing === selectedProjectId + "_read"}
+                  className="flex items-center gap-1.5 rounded-xl border border-black/15 px-3 py-1.5 text-xs font-medium text-black/60 transition hover:border-black hover:text-black disabled:opacity-50"
+                >
+                  <Check size={13} />
+                  Mark all read
+                </button>
+              )}
+              <button
+                onClick={() => setDeleteWarning(selectedProjectId)}
+                disabled={!!bulkProcessing}
+                className="flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 transition hover:bg-red-50 disabled:opacity-50"
               >
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      {!notif.read && (
-                        <span className="h-2 w-2 rounded-full bg-black shrink-0" />
-                      )}
-                      <p className="text-xs text-black/50 flex items-center gap-1">
-                        <Briefcase size={11} />
-                        {notif.projectTitle}
-                      </p>
-                    </div>
-                    <div
-                      className={`flex items-center gap-1.5 text-sm font-semibold ${
-                        notif.type === "request_approved" ? "text-emerald-600"
-                        : notif.type === "payment_released" ? "text-violet-600"
-                        : "text-black/50"
-                      }`}
-                    >
-                      {notif.type === "request_approved" ? (
-                        <><CheckCircle2 size={15} /> Request approved</>
-                      ) : notif.type === "payment_released" ? (
-                        <><CheckCircle2 size={15} /> Payment received</>
-                      ) : (
-                        <><XCircle size={15} /> Not selected this time</>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1.5">
-                    <span className="text-xs text-black/35">{timeAgo(notif.createdAt)}</span>
-                    {!notif.read && (
-                      <button
-                        onClick={() => markRead(notif.id)}
-                        className="rounded-lg bg-black px-3 py-1 text-xs font-medium text-white transition hover:bg-black/75"
-                      >
-                        Mark as read
-                      </button>
-                    )}
-                  </div>
-                </div>
+                <Trash2 size={13} />
+                Delete all
+              </button>
+            </div>
+          </div>
 
-                {notif.type === "request_approved" && (
-                  <div className="mt-2 space-y-2">
-                    <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
-                      <p className="text-xs text-emerald-700 font-medium mb-1.5">
-                        You can now contact the publisher directly:
-                      </p>
-                      <a
-                        href={`mailto:${notif.fromEmail}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline"
-                      >
-                        <Mail size={14} />
-                        {notif.fromEmail}
-                      </a>
-                    </div>
-                    {notif.escrowTx && (
-                      <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
-                        <div className="flex items-start gap-2.5">
-                          <Shield size={14} className="text-violet-600 shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-xs font-semibold text-violet-700 mb-1">
-                              {notif.escrowBudget ? `${notif.escrowBudget} USDC` : "Payment"} locked in escrow
-                            </p>
-                            <p className="text-xs text-violet-600 leading-relaxed">
-                              Your payment is secured in a Solana smart contract. Funds cannot be moved by anyone until the client releases them upon completion.
-                            </p>
-                            <a
-                              href={`https://solscan.io/tx/${notif.escrowTx}?cluster=devnet`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 underline underline-offset-2"
-                            >
-                              Verify on Solscan →
-                            </a>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {notif.type === "request_declined" && (
-                  <div className="mt-2 space-y-2">
-                    {notif.declineReason && (
-                      <div className="rounded-xl bg-black/4 px-4 py-3">
-                        <p className="text-xs text-black/40 mb-1">Reason given</p>
-                        <p className="text-sm text-black/70 leading-relaxed">&ldquo;{notif.declineReason}&rdquo;</p>
-                      </div>
-                    )}
-                    <p className="text-xs text-black/40 leading-relaxed">
-                      The publisher wasn&apos;t able to move forward at this time — no worries, it&apos;s not a reflection of your skills.
-                      You&apos;re welcome to send a new request after <span className="font-medium text-black/60">12 hours</span>, or explore other opportunities in Open Jobs.
-                    </p>
-                  </div>
-                )}
-
-                {notif.type === "payment_released" && (
-                  <div className="mt-2 space-y-2">
-                    <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
-                      <div className="flex items-start gap-2.5">
-                        <Shield size={14} className="text-violet-600 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-xs font-semibold text-violet-700 mb-1">
-                            {notif.budget} {notif.currency} paid by {notif.fromName}
-                          </p>
-                          <p className="text-xs text-violet-600 leading-relaxed">
-                            The funds have been released from escrow and sent directly to your Solana wallet. Check your balance in Phantom.
-                          </p>
-                          {notif.paymentTx && (
-                            <a
-                              href={`https://solscan.io/tx/${notif.paymentTx}?cluster=devnet`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 underline underline-offset-2"
-                            >
-                              View payment transaction →
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    {notif.fromEmail && (
-                      <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
-                        <p className="text-xs text-emerald-700 font-medium mb-1.5">Contact your client:</p>
-                        <a
-                          href={`mailto:${notif.fromEmail}`}
-                          className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline"
-                        >
-                          <Mail size={14} />
-                          {notif.fromEmail}
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
+          <div className="space-y-3">
+            {selectedGroup?.notifications.map((notif) => (
+              <NotificationCard
+                key={notif.id}
+                notif={notif}
+                processing={processing}
+                profileLoading={profileLoading}
+                onApprove={handleApprove}
+                onDeclineOpen={(n) => { setDeclineModal(n); setDeclineReason(""); }}
+                onMarkRead={markRead}
+                onViewProfile={handleViewProfile}
+              />
+            ))}
+          </div>
         </div>
       )}
+
+      {/* Delete all warning modal */}
+      {deleteWarning && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setDeleteWarning(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 mb-4">
+              <AlertTriangle size={22} className="text-red-500" />
+            </div>
+            <h3 className="font-semibold text-black mb-1">
+              {deleteWarning === "__all__" ? "Delete all notifications?" : "Delete project notifications?"}
+            </h3>
+            <p className="text-sm text-black/55 leading-relaxed mb-2">
+              {deleteWarning === "__all__"
+                ? "This will permanently delete every notification across all your projects."
+                : "This will permanently delete all notifications for this project."}
+            </p>
+            <div className="rounded-xl bg-red-50 border border-red-100 px-3 py-2 mb-5">
+              <p className="text-xs font-semibold text-red-600">
+                This is an irreversible action — deleted notifications cannot be recovered.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteWarning(null)}
+                className="flex-1 rounded-xl border border-black/20 px-4 py-2.5 text-sm font-medium transition hover:bg-black/5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteAll(deleteWarning)}
+                disabled={bulkProcessing === deleteWarning + "_delete"}
+                className="flex-1 rounded-xl bg-red-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-50"
+              >
+                {bulkProcessing === deleteWarning + "_delete" ? "Deleting…" : "Delete all"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Escrow error modal */}
       {escrowError !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
@@ -528,7 +861,9 @@ export default function Notifications() {
               There seems to be an error with the escrow transaction. Please try again after some time.
             </p>
             {escrowError && (
-              <pre className="text-xs bg-black/5 rounded-lg p-3 overflow-auto max-h-40 text-black/50 whitespace-pre-wrap">{escrowError}</pre>
+              <pre className="text-xs bg-black/5 rounded-lg p-3 overflow-auto max-h-40 text-black/50 whitespace-pre-wrap">
+                {escrowError}
+              </pre>
             )}
             <button
               onClick={() => setEscrowError(null)}
@@ -540,6 +875,7 @@ export default function Notifications() {
         </div>
       )}
 
+      {/* View profile modal */}
       {viewProfile && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -558,7 +894,6 @@ export default function Notifications() {
                 <X size={18} />
               </button>
             </div>
-
             <div className="p-6 space-y-5">
               {viewProfile._noData ? (
                 <div className="text-center py-6">
@@ -568,95 +903,83 @@ export default function Notifications() {
                   <p className="font-semibold">{viewProfile.name || "Unknown"}</p>
                   <p className="text-sm text-black/40 mt-1">Profile details not available</p>
                 </div>
-              ) : (<>
-              {/* Name + role */}
-              <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-black/8">
-                  <User size={24} className="text-black/40" />
-                </div>
-                <div>
-                  <p className="text-lg font-semibold leading-tight">{viewProfile.name || "—"}</p>
-                  {viewProfile.role && (
-                    <p className="text-sm text-black/50 mt-0.5">{viewProfile.role}</p>
+              ) : (
+                <>
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-black/8">
+                      <User size={24} className="text-black/40" />
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold leading-tight">{viewProfile.name || "—"}</p>
+                      {viewProfile.role && <p className="text-sm text-black/50 mt-0.5">{viewProfile.role}</p>}
+                      {(viewProfile.city || viewProfile.country) && (
+                        <p className="mt-1 flex items-center gap-1 text-xs text-black/40">
+                          <MapPin size={11} />
+                          {[viewProfile.city, viewProfile.country].filter(Boolean).join(", ")}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {viewProfile.bio && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-black/35 mb-1.5">Bio</p>
+                      <p className="text-sm text-black/70 leading-relaxed">{viewProfile.bio}</p>
+                    </div>
                   )}
-                  {(viewProfile.city || viewProfile.country) && (
-                    <p className="mt-1 flex items-center gap-1 text-xs text-black/40">
-                      <MapPin size={11} />
-                      {[viewProfile.city, viewProfile.country].filter(Boolean).join(", ")}
-                    </p>
+                  {viewProfile.professions?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-black/35 mb-2">Professions</p>
+                      <div className="flex flex-wrap gap-2">
+                        {viewProfile.professions.map((p) => (
+                          <span key={p} className="rounded-full bg-black/8 px-3 py-1 text-xs font-medium text-black/70">{p}</span>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                </div>
-              </div>
-
-              {/* Bio */}
-              {viewProfile.bio && (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-black/35 mb-1.5">Bio</p>
-                  <p className="text-sm text-black/70 leading-relaxed">{viewProfile.bio}</p>
-                </div>
+                  {viewProfile.skills && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-black/35 mb-2">Skills</p>
+                      <div className="flex flex-wrap gap-2">
+                        {viewProfile.skills.split(",").map((s) => s.trim()).filter(Boolean).map((s) => (
+                          <span key={s} className="rounded-full border border-black/10 px-3 py-1 text-xs text-black/60">{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    {viewProfile.experienceLevel && (
+                      <div className="rounded-xl bg-black/5 px-4 py-3">
+                        <p className="text-xs text-black/40">Experience</p>
+                        <p className="mt-1 text-sm font-semibold">{viewProfile.experienceLevel}</p>
+                      </div>
+                    )}
+                    {viewProfile.availability && (
+                      <div className="rounded-xl bg-black/5 px-4 py-3">
+                        <p className="text-xs text-black/40">Availability</p>
+                        <p className="mt-1 text-sm font-semibold">{viewProfile.availability}</p>
+                      </div>
+                    )}
+                    {viewProfile.workType && (
+                      <div className="rounded-xl bg-black/5 px-4 py-3">
+                        <p className="text-xs text-black/40">Work Type</p>
+                        <p className="mt-1 text-sm font-semibold">{viewProfile.workType}</p>
+                      </div>
+                    )}
+                    {viewProfile.primaryRole && (
+                      <div className="rounded-xl bg-black/5 px-4 py-3">
+                        <p className="text-xs text-black/40">Primary Role</p>
+                        <p className="mt-1 text-sm font-semibold">{viewProfile.primaryRole}</p>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
-
-              {/* Professions */}
-              {viewProfile.professions?.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-black/35 mb-2">Professions</p>
-                  <div className="flex flex-wrap gap-2">
-                    {viewProfile.professions.map((p) => (
-                      <span key={p} className="rounded-full bg-black/8 px-3 py-1 text-xs font-medium text-black/70">
-                        {p}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Skills */}
-              {viewProfile.skills && (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-black/35 mb-2">Skills</p>
-                  <div className="flex flex-wrap gap-2">
-                    {viewProfile.skills.split(",").map((s) => s.trim()).filter(Boolean).map((s) => (
-                      <span key={s} className="rounded-full border border-black/10 px-3 py-1 text-xs text-black/60">
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Details row */}
-              <div className="grid grid-cols-2 gap-3">
-                {viewProfile.experienceLevel && (
-                  <div className="rounded-xl bg-black/5 px-4 py-3">
-                    <p className="text-xs text-black/40">Experience</p>
-                    <p className="mt-1 text-sm font-semibold">{viewProfile.experienceLevel}</p>
-                  </div>
-                )}
-                {viewProfile.availability && (
-                  <div className="rounded-xl bg-black/5 px-4 py-3">
-                    <p className="text-xs text-black/40">Availability</p>
-                    <p className="mt-1 text-sm font-semibold">{viewProfile.availability}</p>
-                  </div>
-                )}
-                {viewProfile.workType && (
-                  <div className="rounded-xl bg-black/5 px-4 py-3">
-                    <p className="text-xs text-black/40">Work Type</p>
-                    <p className="mt-1 text-sm font-semibold">{viewProfile.workType}</p>
-                  </div>
-                )}
-                {viewProfile.primaryRole && (
-                  <div className="rounded-xl bg-black/5 px-4 py-3">
-                    <p className="text-xs text-black/40">Primary Role</p>
-                    <p className="mt-1 text-sm font-semibold">{viewProfile.primaryRole}</p>
-                  </div>
-                )}
-              </div>
-            </>)}
             </div>
           </div>
         </div>
       )}
 
+      {/* Decline modal */}
       {declineModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"

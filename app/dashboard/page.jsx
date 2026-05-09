@@ -20,6 +20,7 @@ export default function Dashboard() {
   const router = useRouter();
   const [activePage, setActivePage] = useState("Dashboard");
   const [checking, setChecking] = useState(true);
+  const [jobPrefill, setJobPrefill] = useState(null);
 
   useEffect(() => {
     if (!user) {
@@ -52,9 +53,9 @@ export default function Dashboard() {
 
       <main className="ml-20 p-8 md:ml-72">
         {activePage === "Dashboard" && <DashboardHome setActivePage={setActivePage} />}
-        {activePage === "Hire Talent" && <AddProjects />}
+        {activePage === "Hire Talent" && <AddProjects prefill={jobPrefill} onPrefillConsumed={() => setJobPrefill(null)} />}
         {activePage === "Open Jobs" && <OpenJobs />}
-        {activePage === "Work History" && <WorkHistory />}
+        {activePage === "Work History" && <WorkHistory setActivePage={setActivePage} setJobPrefill={setJobPrefill} />}
         {activePage === "Notifications" && <Notifications />}
         {activePage === "Settings" && <Settings />}
         {activePage === "Profile" && <Profile />}
