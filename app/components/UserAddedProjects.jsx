@@ -165,6 +165,7 @@ export default function UserAddedProjects() {
       experienceLevel: selectedProject.experienceLevel || EXPERIENCE_LEVELS[0],
       tags: (selectedProject.tags || []).join(", "),
       requirements: selectedProject.requirements || "",
+      freelancerCount: selectedProject.freelancerCount || 1,
     });
     setEditErrors({});
     setIsEditing(true);
@@ -240,6 +241,7 @@ export default function UserAddedProjects() {
         experienceLevel: editData.experienceLevel,
         tags: parseTags(editData.tags),
         requirements: editData.requirements,
+        freelancerCount: Math.min(99, Math.max(1, parseInt(editData.freelancerCount, 10) || 1)),
         updatedAt: serverTimestamp(),
       };
 
@@ -568,6 +570,33 @@ export default function UserAddedProjects() {
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-black/40">Freelancers needed</label>
+                    <div className="flex items-center gap-2 w-36">
+                      <button
+                        type="button"
+                        onClick={() => field("freelancerCount", Math.max(1, (parseInt(editData.freelancerCount, 10) || 1) - 1))}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-black/20 text-lg font-medium transition hover:bg-black hover:text-white"
+                      >
+                        −
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        max="99"
+                        value={editData.freelancerCount}
+                        onChange={(e) => field("freelancerCount", Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                        className="w-full rounded-xl border border-black/20 bg-white text-black px-3 py-2 text-sm text-center outline-none focus:border-black"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => field("freelancerCount", Math.min(99, (parseInt(editData.freelancerCount, 10) || 1) + 1))}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-black/20 text-lg font-medium transition hover:bg-black hover:text-white"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-4">
@@ -587,6 +616,12 @@ export default function UserAddedProjects() {
                         : selectedProject.durationDays > 0
                         ? `${selectedProject.durationDays} day${selectedProject.durationDays !== 1 ? "s" : ""}`
                         : formatDate(selectedProject.deadline)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-black/5 px-4 py-3">
+                    <p className="text-xs text-black/40">Freelancers needed</p>
+                    <p className="mt-1 font-semibold">
+                      {selectedProject.approvedCount || 0} / {selectedProject.freelancerCount || 1} filled
                     </p>
                   </div>
                 </div>

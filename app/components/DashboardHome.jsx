@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef } from "react";
-import { collection, onSnapshot, orderBy, query, doc, getDoc, updateDoc } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, doc, getDoc, updateDoc, setDoc } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, formatBudget } from "../context/CurrencyContext";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { Wallet, Briefcase, Bookmark, Award, Shield, ChevronRight, Zap, X, User } from "lucide-react";
+import { Wallet, Briefcase, Bookmark, Award, ChevronRight, Zap, X, User } from "lucide-react";
 
 function computeSuggestionScore(job, userProfile) {
   if (!userProfile) return 0;
@@ -147,7 +147,7 @@ export default function DashboardHome({ setActivePage }) {
 
   useEffect(() => {
     if (!connected || !publicKey || !user) return;
-    updateDoc(doc(db, "users", user.uid), { walletAddress: publicKey.toBase58() }).catch(console.error);
+    setDoc(doc(db, "users", user.uid), { walletAddress: publicKey.toBase58() }, { merge: true }).catch(console.error);
   }, [connected, publicKey, user]);
 
 
@@ -501,11 +501,17 @@ export default function DashboardHome({ setActivePage }) {
 
       {/* Active Gigs + Reputation placeholders */}
       <div className="grid gap-4 md:grid-cols-2">
-        <PlaceholderCard
-          icon={<Shield size={15} className="text-black/35" />}
-          title="Active Gigs"
-          body="Once the Solana escrow system is live, your funded gigs will appear here with real-time status — funded, delivered, or in dispute."
-        />
+        <div
+          onClick={() => setActivePage("Active Gigs")}
+          className="cursor-pointer rounded-2xl border border-black/10 p-5 transition-all duration-200 hover:shadow-md hover:border-black/25"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Zap size={15} className="text-black/40" />
+            <h2 className="font-semibold text-sm">Active Gigs</h2>
+            <ChevronRight size={13} className="ml-auto text-black/30" />
+          </div>
+          <p className="text-sm text-black/40">Track your in-progress gigs, submit completed milestones, and release escrow payments.</p>
+        </div>
         <PlaceholderCard
           icon={<Award size={15} className="text-black/35" />}
           title="On-chain Reputation"

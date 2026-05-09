@@ -12,6 +12,15 @@ const ESCROW_PROGRAM_DATA = new PublicKey("Gpk1MiFBTni17LSapxGF7NsX3MNogGMvCAWCu
 export const USDC_DEVNET_MINT = new PublicKey("AKZ8aZN6jLVLZbvvcTGvihz7sE6EzLm4vwD9cCcdkjDh");
 
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe8bSe");
+
+function getAssociatedTokenAddress(ownerKey, mintKey) {
+  const [address] = PublicKey.findProgramAddressSync(
+    [ownerKey.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mintKey.toBytes()],
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  return address;
+}
 
 async function disc(name) {
   const input = new TextEncoder().encode(`global:${name}`);
@@ -56,19 +65,75 @@ function vaultPda(escrowKey) {
 }
 
 
+async function findTokenAccountWithBalance(connection, ownerKey, mintKey) {
+  const accounts = await connection.getParsedTokenAccountsByOwner(ownerKey, { mint: mintKey });
+  if (accounts.value.length === 0) throw new Error("No USDC token account found — fund the wallet first");
+  const info = accounts.value[0].account.data.parsed.info;
+  return {
+    pubkey: accounts.value[0].pubkey,
+    balance: BigInt(info.tokenAmount.amount),
+  };
+}
+
 async function findTokenAccount(connection, ownerKey, mintKey) {
   const accounts = await connection.getTokenAccountsByOwner(ownerKey, { mint: mintKey });
   if (accounts.value.length === 0) throw new Error("No USDC token account found — fund the wallet first");
   return accounts.value[0].pubkey;
 }
 
+export async function buildMilestoneEscrowTxs(connection, clientKey, freelancerKey, projectId, milestones, totalAmountUsdc) {
+  const { pubkey: clientAta, balance } = await findTokenAccountWithBalance(connection, clientKey, USDC_DEVNET_MINT);
+  if (balance < BigInt(totalAmountUsdc)) {
+    const have = (Number(balance) / 1_000_000).toFixed(2);
+    const need = (totalAmountUsdc / 1_000_000).toFixed(2);
+    throw new Error(`Insufficient devnet USDC — wallet has ${have} USDC but all milestones require ${need} USDC total.`);
+  }
+
+  const { blockhash } = await connection.getLatestBlockhash();
+  const d = await disc("create_escrow");
+  const txs = [];
+  const milestoneProjectIds = [];
+  const milestoneAmounts = [];
+
+  for (let i = 0; i < milestones.length; i++) {
+    const msProjectId = `${projectId}_m${i}`;
+    const msAmount = Math.round((milestones[i].percentage / 100) * totalAmountUsdc);
+    const [escrow] = escrowPda(clientKey, msProjectId);
+    const [vault] = vaultPda(escrow);
+    const args = encodeCreateEscrowArgs(msProjectId, msAmount, freelancerKey);
+    const data = new Uint8Array(d.length + args.length);
+    data.set(d);
+    data.set(args, d.length);
+    const ix = new TransactionInstruction({
+      programId: ESCROW_PROGRAM_ID,
+      keys: [
+        { pubkey: clientKey, isSigner: true, isWritable: true },
+        { pubkey: freelancerKey, isSigner: false, isWritable: false },
+        { pubkey: escrow, isSigner: false, isWritable: true },
+        { pubkey: vault, isSigner: false, isWritable: true },
+        { pubkey: clientAta, isSigner: false, isWritable: true },
+        { pubkey: USDC_DEVNET_MINT, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+        { pubkey: ESCROW_PROGRAM_DATA, isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+    const tx = new Transaction({ feePayer: clientKey, recentBlockhash: blockhash });
+    tx.add(ix);
+    txs.push(tx);
+    milestoneProjectIds.push(msProjectId);
+    milestoneAmounts.push(msAmount);
+  }
+
+  return { txs, milestoneProjectIds, milestoneAmounts };
+}
+
 export async function buildCreateEscrowTx(connection, clientKey, freelancerKey, projectId, amountUsdc) {
   const [escrow] = escrowPda(clientKey, projectId);
   const [vault] = vaultPda(escrow);
-  const clientAta = await findTokenAccount(connection, clientKey, USDC_DEVNET_MINT);
-
-  const tokenBalance = await connection.getTokenAccountBalance(clientAta);
-  const balance = BigInt(tokenBalance.value.amount);
+  const { pubkey: clientAta, balance } = await findTokenAccountWithBalance(connection, clientKey, USDC_DEVNET_MINT);
   if (balance < BigInt(amountUsdc)) {
     const have = (Number(balance) / 1_000_000).toFixed(2);
     const need = (amountUsdc / 1_000_000).toFixed(2);
@@ -98,24 +163,16 @@ export async function buildCreateEscrowTx(connection, clientKey, freelancerKey, 
     data,
   });
 
-  const { blockhash } = await connection.getLatestBlockhash();
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
   const tx = new Transaction({ feePayer: clientKey, recentBlockhash: blockhash });
   tx.add(escrowIx);
-  return tx;
+  return { tx, blockhash, lastValidBlockHeight };
 }
 
 export async function buildReleasePaymentTx(connection, clientKey, freelancerKey, projectId) {
   const [escrow] = escrowPda(clientKey, projectId);
   const [vault] = vaultPda(escrow);
-
-  const ataAccounts = await connection.getTokenAccountsByOwner(freelancerKey, { mint: USDC_DEVNET_MINT });
-  if (ataAccounts.value.length === 0) {
-    throw new Error(
-      "FREELANCER_NO_ATA: The freelancer hasn't set up their USDC wallet yet. " +
-      "Ask them to visit their Profile page and click 'Get 500 Test USDC' to create it."
-    );
-  }
-  const freelancerAta = ataAccounts.value[0].pubkey;
+  const freelancerAta = getAssociatedTokenAddress(freelancerKey, USDC_DEVNET_MINT);
 
   const d = await disc("release_payment");
 
@@ -133,10 +190,10 @@ export async function buildReleasePaymentTx(connection, clientKey, freelancerKey
     data: d,
   });
 
-  const { blockhash } = await connection.getLatestBlockhash();
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
   const tx = new Transaction({ feePayer: clientKey, recentBlockhash: blockhash });
   tx.add(ix);
-  return tx;
+  return { tx, blockhash, lastValidBlockHeight };
 }
 
 export async function buildRefundTx(connection, clientKey, projectId) {
@@ -159,8 +216,8 @@ export async function buildRefundTx(connection, clientKey, projectId) {
     data: d,
   });
 
-  const { blockhash } = await connection.getLatestBlockhash();
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
   const tx = new Transaction({ feePayer: clientKey, recentBlockhash: blockhash });
   tx.add(ix);
-  return tx;
+  return { tx, blockhash, lastValidBlockHeight };
 }

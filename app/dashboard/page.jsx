@@ -14,12 +14,14 @@ import OpenJobs from "../components/OpenJobs";
 import DashboardHome from "../components/DashboardHome";
 import WorkHistory from "../components/WorkHistory";
 import Notifications from "../components/Notifications";
+import ActiveGigs from "../components/ActiveGigs";
 
 export default function Dashboard() {
   const { user } = useAuth();
   const router = useRouter();
   const [activePage, setActivePage] = useState("Dashboard");
   const [checking, setChecking] = useState(true);
+  const [jobPrefill, setJobPrefill] = useState(null);
 
   useEffect(() => {
     if (!user) {
@@ -52,10 +54,11 @@ export default function Dashboard() {
 
       <main className="ml-20 p-8 md:ml-72">
         {activePage === "Dashboard" && <DashboardHome setActivePage={setActivePage} />}
-        {activePage === "Hire Talent" && <AddProjects />}
+        {activePage === "Hire Talent" && <AddProjects prefill={jobPrefill} onPrefillConsumed={() => setJobPrefill(null)} />}
         {activePage === "Open Jobs" && <OpenJobs />}
-        {activePage === "Work History" && <WorkHistory />}
-        {activePage === "Notifications" && <Notifications />}
+        {activePage === "Work History" && <WorkHistory setActivePage={setActivePage} setJobPrefill={setJobPrefill} />}
+        {activePage === "Active Gigs" && <ActiveGigs />}
+        {activePage === "Notifications" && <Notifications setActivePage={setActivePage} />}
         {activePage === "Settings" && <Settings />}
         {activePage === "Profile" && <Profile />}
       </main>
