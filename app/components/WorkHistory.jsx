@@ -715,25 +715,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  updateDoc,
-  doc,
-  setDoc,
-  addDoc,
-  serverTimestamp,
-  increment,
-} from "firebase/firestore";
-import { uploadGigRecord, arweaveUrl } from "@/app/lib/arweave";
+import { collection, onSnapshot, orderBy, query, doc } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, formatBudget } from "../context/CurrencyContext";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { PublicKey } from "@solana/web3.js";
-import { buildCreateEscrowTx, buildReleasePaymentTx, buildRefundTx } from "@/app/lib/escrow";
 import {
   Briefcase,
   Clock,
@@ -816,175 +801,8 @@ function StatusBadge({ status }) {
 
 // ─── client project row (unchanged behaviour) ─────────────────────────────────
 
-function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEmail, onRepost }) {
+function ProjectRow({ project, defaultCurrency, rates, onRepost }) {
   const [expanded, setExpanded] = useState(false);
-  const [statusUpdating, setStatusUpdating] = useState(false);
-  const [escrowProcessing, setEscrowProcessing] = useState(false);
-  const [escrowMsg, setEscrowMsg] = useState(null);
-  const { publicKey, sendTransaction, signTransaction } = useWallet();
-  const { connection } = useConnection();
-
-  const handleRelease = async () => {
-    if (!publicKey || !project.approvedFreelancerWallet) return;
-    setEscrowProcessing(true);
-    setEscrowMsg(null);
-    try {
-      const freelancerKey = new PublicKey(project.approvedFreelancerWallet);
-      const tx = await buildReleasePaymentTx(connection, publicKey, freelancerKey, project.id);
-      const signedTx = await signTransaction(tx);
-      const sig = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(sig, "confirmed");
-      const completedData = { status: "completed", paymentReleasedTx: sig };
-      await Promise.all([
-        updateDoc(doc(db, "projects", project.id), completedData),
-        updateDoc(doc(db, "users", userId, "projectsAdded", project.id), completedData),
-      ]);
-
-      if (project.approvedFreelancerUid) {
-        try {
-          const record = {
-            platform: "GigProof",
-            type: "completed_gig",
-            projectId: project.id,
-            projectTitle: project.title,
-            freelancerWallet: project.approvedFreelancerWallet,
-            clientWallet: publicKey.toString(),
-            budget: project.budget,
-            currency: project.currency || "USDC",
-            escrowTx: project.escrowTx || null,
-            paymentTx: sig,
-            completedAt: new Date().toISOString(),
-            description: project.description || "",
-            tags: project.tags || [],
-          };
-          const txId = await uploadGigRecord(record);
-          const gigDoc = {
-            ...record,
-            arweaveTx: txId,
-            arweaveUrl: arweaveUrl(txId),
-            projectTitle: project.title,
-          };
-          await setDoc(
-            doc(db, "users", project.approvedFreelancerUid, "completedGigs", project.id),
-            gigDoc
-          );
-        } catch (arweaveErr) {
-          console.warn("Arweave upload skipped:", arweaveErr.message);
-        }
-      }
-
-      if (project.approvedFreelancerUid) {
-        try {
-          await addDoc(collection(db, "notifications"), {
-            type: "payment_released",
-            toUid: project.approvedFreelancerUid,
-            fromUid: userId,
-            fromName: userName,
-            fromEmail: userEmail,
-            projectId: project.id,
-            projectTitle: project.title,
-            budget: project.budget,
-            currency: project.currency || "USDC",
-            paymentTx: sig,
-            read: false,
-            createdAt: serverTimestamp(),
-          });
-        } catch (notifErr) {
-          console.warn("Payment notification failed:", notifErr.message);
-        }
-      }
-
-      setEscrowMsg({ type: "success", text: "Payment released!", tx: sig });
-    } catch (e) {
-      const msg = e.message?.startsWith("FREELANCER_NO_ATA:")
-        ? e.message.replace("FREELANCER_NO_ATA: ", "")
-        : e.message || "Transaction failed";
-      setEscrowMsg({ type: "error", text: msg });
-    } finally {
-      setEscrowProcessing(false);
-    }
-  };
-
-  const handleCreateEscrow = async () => {
-    if (!publicKey || !project.approvedFreelancerWallet) return;
-    setEscrowProcessing(true);
-    setEscrowMsg(null);
-    try {
-      const freelancerKey = new PublicKey(project.approvedFreelancerWallet);
-      const amountUsdc = Math.round(Number(project.budget) * 1_000_000);
-      const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, project.id, amountUsdc);
-      const signedTx = await signTransaction(tx);
-      const sig = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(sig, "confirmed");
-      // Escrow confirmed — count the slot as taken (covers the deferred-funding case
-      // where the client approved without a wallet connected and funds from here).
-      const escrowData = { escrowCreated: true, escrowTx: sig, approvedCount: increment(1) };
-      await Promise.all([
-        updateDoc(doc(db, "projects", project.id), escrowData),
-        updateDoc(doc(db, "users", userId, "projectsAdded", project.id), escrowData),
-      ]);
-      setEscrowMsg({ type: "success", text: "Escrow funded!", tx: sig });
-    } catch (e) {
-      setEscrowMsg({ type: "error", text: e.message || "Transaction failed" });
-    } finally {
-      setEscrowProcessing(false);
-    }
-  };
-
-  const handleRefund = async () => {
-    if (!publicKey) return;
-    setEscrowProcessing(true);
-    setEscrowMsg(null);
-    try {
-      const tx = await buildRefundTx(connection, publicKey, project.id);
-      const sig = await sendTransaction(tx, connection);
-      await connection.confirmTransaction(sig, "confirmed");
-      await Promise.all([
-        updateDoc(doc(db, "projects", project.id), { status: "cancelled", refundTx: sig, escrowCreated: false }),
-        updateDoc(doc(db, "users", userId, "projectsAdded", project.id), { status: "cancelled", refundTx: sig, escrowCreated: false }),
-      ]);
-      // Notify the freelancer that the escrow was refunded
-      if (project.approvedFreelancerUid) {
-        try {
-          await addDoc(collection(db, "notifications"), {
-            type: "escrow_refunded",
-            toUid: project.approvedFreelancerUid,
-            fromUid: userId,
-            fromName: userName,
-            fromEmail: userEmail,
-            projectId: project.id,
-            projectTitle: project.title,
-            budget: project.budget,
-            currency: project.currency || "USDC",
-            refundTx: sig,
-            read: false,
-            createdAt: serverTimestamp(),
-          });
-        } catch (notifErr) {
-          console.warn("Refund notification failed:", notifErr.message);
-        }
-      }
-      setEscrowMsg({ type: "success", text: "Refund complete!", tx: sig });
-    } catch (e) {
-      setEscrowMsg({ type: "error", text: e.message || "Transaction failed" });
-    } finally {
-      setEscrowProcessing(false);
-    }
-  };
-
-  const handleStatusChange = async (newStatus) => {
-    if (!userId || project.status === newStatus) return;
-    setStatusUpdating(true);
-    try {
-      const fields = { status: newStatus };
-      await updateDoc(doc(db, "users", userId, "projectsAdded", project.id), fields);
-      await updateDoc(doc(db, "projects", project.id), fields);
-    } catch (e) {
-      console.error("Status update error:", e);
-    } finally {
-      setStatusUpdating(false);
-    }
-  };
 
   return (
     <div className="rounded-2xl border border-black/8 bg-white transition-all duration-200 hover:border-black/15 hover:shadow-sm">
@@ -1053,18 +871,16 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
           )}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl bg-black/4 px-4 py-3">
-              <p className="text-xs text-black/40">Experience</p>
-              <p className="mt-0.5 text-sm font-semibold text-black">{project.experienceLevel || "Any"}</p>
-            </div>
-            <div className="rounded-xl bg-black/4 px-4 py-3">
-              <p className="text-xs text-black/40">Currency</p>
-              <p className="mt-0.5 text-sm font-semibold text-black">{project.currency || "—"}</p>
-            </div>
-            <div className="rounded-xl bg-black/4 px-4 py-3">
-              <p className="text-xs text-black/40">Status</p>
-              <p className="mt-0.5 text-sm font-semibold capitalize text-black">{project.status}</p>
-            </div>
+            {[
+              ["Experience", project.experienceLevel || "Any"],
+              ["Currency", project.currency || "—"],
+              ["Status", project.status],
+            ].map(([label, val]) => (
+              <div key={label} className="rounded-xl bg-black/4 px-4 py-3">
+                <p className="text-xs text-black/40">{label}</p>
+                <p className="mt-0.5 text-sm font-semibold text-black capitalize">{val}</p>
+              </div>
+            ))}
           </div>
 
           {project.tags?.length > 0 && (
@@ -1082,50 +898,28 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
             </div>
           )}
 
-          {project.currency === "USDC" && (project.approvedFreelancerUid || project.escrowCreated || project.refundTx || ["approved", "in-progress", "completed"].includes(project.status)) && (
-            <div className="rounded-xl border border-black/8 bg-black/2 p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-black/35">Escrow</p>
-
-              {/* Only show the original escrow lock link when funds haven't been returned */}
+          {/* Escrow history — read-only proof links */}
+          {project.currency === "USDC" && (project.escrowTx || project.paymentReleasedTx || project.refundTx) && (
+            <div className="rounded-xl border border-black/8 bg-black/[0.02] p-4 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-black/35">Escrow history</p>
               {project.escrowTx && !project.refundTx && (
-                <a
-                  href={`https://solscan.io/tx/${project.escrowTx}?cluster=devnet`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-black/50 hover:text-black transition"
-                >
-                  <Wallet size={11} />
-                  USDC locked · view on Solscan
+                <a href={`https://solscan.io/tx/${project.escrowTx}?cluster=devnet`} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-black/50 hover:text-black transition">
+                  <Wallet size={11} /> USDC locked · Solscan
                 </a>
               )}
-
-              {/* Local tx feedback — hide once the project doc reflects the final state */}
-              {escrowMsg && !project.paymentReleasedTx && !project.refundTx && (
-                <div className={`text-xs px-3 py-2 rounded-lg ${escrowMsg.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
-                  {escrowMsg.text}
-                  {escrowMsg.tx && (
-                    <a href={`https://solscan.io/tx/${escrowMsg.tx}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="ml-2 underline">
-                      View tx
-                    </a>
-                  )}
-                </div>
+              {project.paymentReleasedTx && (
+                <a href={`https://solscan.io/tx/${project.paymentReleasedTx}?cluster=devnet`} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:text-emerald-800 transition">
+                  <CheckCircle2 size={11} /> Payment released · Solscan
+                </a>
               )}
-
-              {project.refundTx ? (
+              {project.refundTx && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-red-500">
-                    <CheckCircle2 size={13} />
-                    Refund complete — funds returned to your wallet ·{" "}
-                    <a
-                      href={`https://solscan.io/tx/${project.refundTx}?cluster=devnet`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      View tx
-                    </a>
-                  </div>
+                  <a href={`https://solscan.io/tx/${project.refundTx}?cluster=devnet`} target="_blank" rel="noreferrer"
+                    className="flex items-center gap-1.5 text-xs font-medium text-red-500 hover:text-red-700 transition">
+                    <CheckCircle2 size={11} /> Refund complete · Solscan
+                  </a>
                   {onRepost && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onRepost(project); }}
@@ -1135,75 +929,9 @@ function ProjectRow({ project, defaultCurrency, rates, userId, userName, userEma
                     </button>
                   )}
                 </div>
-              ) : project.paymentReleasedTx ? (
-                <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                  <CheckCircle2 size={13} />
-                  Payment released ·{" "}
-                  <a
-                    href={`https://solscan.io/tx/${project.paymentReleasedTx}?cluster=devnet`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    View tx
-                  </a>
-                </div>
-              ) : project.escrowCreated ? (
-                <div className="flex gap-2">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleRelease(); }}
-                    disabled={escrowProcessing || !publicKey}
-                    className="rounded-full bg-black px-4 py-1.5 text-xs font-medium text-white hover:bg-black/80 disabled:opacity-40 transition"
-                  >
-                    {escrowProcessing ? "Processing…" : "Release Payment"}
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleRefund(); }}
-                    disabled={escrowProcessing || !publicKey}
-                    className="rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-40 transition"
-                  >
-                    Refund
-                  </button>
-                </div>
-              ) : project.approvedFreelancerWallet ? (
-                <div className="space-y-2">
-                  <p className="text-xs text-amber-600">
-                    Escrow not yet funded — lock the payment before releasing it to the freelancer.
-                  </p>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleCreateEscrow(); }}
-                    disabled={escrowProcessing || !publicKey}
-                    className="rounded-full bg-black px-4 py-1.5 text-xs font-medium text-white hover:bg-black/80 disabled:opacity-40 transition"
-                  >
-                    {escrowProcessing ? "Processing…" : "Fund Escrow"}
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-black/40">
-                  Freelancer wallet not on file — they need to connect Phantom on their Profile page before you can fund escrow.
-                </p>
               )}
             </div>
           )}
-
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/35">Update Status</p>
-            <div className="flex flex-wrap gap-2">
-              {["open", "in-progress", "completed", "closed"].map((s) => (
-                <button
-                  key={s}
-                  onClick={(e) => { e.stopPropagation(); handleStatusChange(s); }}
-                  disabled={statusUpdating || project.status === s}
-                  className={`rounded-full px-4 py-1.5 text-xs font-medium transition capitalize ${
-                    project.status === s ? "bg-black text-white" : "bg-black/5 text-black hover:bg-black/10"
-                  } disabled:opacity-40`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       )}
     </div>
@@ -1401,9 +1129,6 @@ export default function WorkHistory({ setActivePage, setJobPrefill }) {
                   project={project}
                   defaultCurrency={defaultCurrency}
                   rates={rates}
-                  userId={user.uid}
-                  userName={user.displayName || user.email?.split("@")[0] || "Client"}
-                  userEmail={user.email}
                   onRepost={handleRepost}
                 />
               ))}

@@ -14,6 +14,7 @@ import OpenJobs from "../components/OpenJobs";
 import DashboardHome from "../components/DashboardHome";
 import WorkHistory from "../components/WorkHistory";
 import Notifications from "../components/Notifications";
+import ActiveGigs from "../components/ActiveGigs";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -56,7 +57,8 @@ export default function Dashboard() {
         {activePage === "Hire Talent" && <AddProjects prefill={jobPrefill} onPrefillConsumed={() => setJobPrefill(null)} />}
         {activePage === "Open Jobs" && <OpenJobs />}
         {activePage === "Work History" && <WorkHistory setActivePage={setActivePage} setJobPrefill={setJobPrefill} />}
-        {activePage === "Notifications" && <Notifications />}
+        {activePage === "Active Gigs" && <ActiveGigs />}
+        {activePage === "Notifications" && <Notifications setActivePage={setActivePage} />}
         {activePage === "Settings" && <Settings />}
         {activePage === "Profile" && <Profile />}
       </main>

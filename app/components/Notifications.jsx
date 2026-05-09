@@ -49,7 +49,7 @@ function MilestoneSplitDisplay({ split, label }) {
   );
 }
 
-function NotificationCard({ notif, processing, profileLoading, onApprove, onDeclineOpen, onMarkRead, onViewProfile, onClientCounter, onFreelancerAccept, onFreelancerCounter, onRejectNegotiation, onApproveOriginal }) {
+function NotificationCard({ notif, processing, profileLoading, walletConnected, onApprove, onDeclineOpen, onMarkRead, onViewProfile, onClientCounter, onFreelancerAccept, onFreelancerCounter, onRejectNegotiation, onApproveOriginal, onGoToActiveGigs }) {
   return (
     <div
       className={`rounded-2xl border p-5 transition ${
@@ -77,6 +77,22 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
             ) : notif.type === "negotiation_split_agreed" ? (
               <div className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
                 <CheckCircle2 size={15} /> {notif.fromName || "Freelancer"} accepted the milestone split
+              </div>
+            ) : notif.type === "milestone_submitted" ? (
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-600">
+                <AlertTriangle size={15} /> {notif.fromName || "Freelancer"} submitted a milestone
+              </div>
+            ) : notif.type === "milestone_approved" ? (
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
+                <CheckCircle2 size={15} /> Milestone approved by client
+              </div>
+            ) : notif.type === "milestone_funded" ? (
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-violet-600">
+                <Shield size={15} /> Milestone {notif.milestoneIndex + 1} funded in escrow
+              </div>
+            ) : notif.type === "gig_cancelled" ? (
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-red-500">
+                <AlertTriangle size={15} /> Gig cancelled by client
               </div>
             ) : (
               <div
@@ -169,8 +185,24 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
             </button>
           </div>
 
+          {notif.status === "approved" && onGoToActiveGigs && (
+            <div className="mb-3">
+              <button
+                onClick={onGoToActiveGigs}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80"
+              >
+                View in Active Gigs →
+              </button>
+            </div>
+          )}
           {notif.status === "pending" && notif.negotiationStatus !== "rejected" ? (
             <div className="flex items-center gap-2 flex-wrap">
+              {!walletConnected && (
+                <div className="w-full flex items-center gap-1.5 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 mb-1">
+                  <AlertTriangle size={12} className="text-amber-600 shrink-0" />
+                  <p className="text-xs text-amber-700">Connect your Phantom wallet before approving to fund the escrow.</p>
+                </div>
+              )}
               <button
                 onClick={() => onApprove(notif)}
                 disabled={processing === notif.id}
@@ -253,17 +285,45 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
               {notif.fromEmail}
             </a>
           </div>
+          {onGoToActiveGigs && (
+            <button
+              onClick={onGoToActiveGigs}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80"
+            >
+              View in Active Gigs →
+            </button>
+          )}
           {notif.escrowTx && (
             <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
               <div className="flex items-start gap-2.5">
                 <Shield size={14} className="text-violet-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-xs font-semibold text-violet-700 mb-1">
-                    {notif.escrowBudget ? `${notif.escrowBudget} USDC` : "Payment"} locked in escrow
-                  </p>
-                  <p className="text-xs text-violet-600 leading-relaxed">
-                    Your payment is secured in a Solana smart contract. Funds cannot be moved by anyone until the client releases them upon completion.
-                  </p>
+                  {notif.milestoneEscrows?.length > 0 ? (
+                    <>
+                      <p className="text-xs font-semibold text-violet-700 mb-1">
+                        {notif.escrowBudget} USDC locked across {notif.milestoneEscrows.length} milestone escrows
+                      </p>
+                      <div className="space-y-0.5 mb-1.5">
+                        {notif.milestoneEscrows.map((e, i) => (
+                          <p key={i} className="text-xs text-violet-600">
+                            Milestone {i + 1}: {((e.amountUsdc || 0) / 1_000_000).toFixed(2)} USDC
+                          </p>
+                        ))}
+                      </div>
+                      <p className="text-xs text-violet-500 leading-relaxed">
+                        Each milestone has its own on-chain escrow. Funds release to your wallet as the client approves each one.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs font-semibold text-violet-700 mb-1">
+                        {notif.escrowBudget ? `${notif.escrowBudget} USDC` : "Payment"} locked in escrow
+                      </p>
+                      <p className="text-xs text-violet-600 leading-relaxed">
+                        Your payment is secured in a Solana smart contract. Funds cannot be moved by anyone until the client releases them upon completion.
+                      </p>
+                    </>
+                  )}
                   <a
                     href={`https://solscan.io/tx/${notif.escrowTx}?cluster=devnet`}
                     target="_blank"
@@ -375,6 +435,158 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
         </div>
       )}
 
+      {/* milestone_submitted body — shown to client */}
+      {notif.type === "milestone_submitted" && (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-xl bg-black/[0.04] px-4 py-3">
+            <p className="text-xs font-medium text-black/40 mb-1">
+              Milestone {notif.milestoneIndex + 1}{notif.milestoneName ? ` — ${notif.milestoneName}` : ""}
+            </p>
+            {notif.message && (
+              <p className="text-sm text-black/70 leading-relaxed">&ldquo;{notif.message}&rdquo;</p>
+            )}
+          </div>
+          {onGoToActiveGigs && (
+            <button
+              onClick={onGoToActiveGigs}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80"
+            >
+              Review & Approve in Active Gigs →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* milestone_approved body — shown to freelancer (intermediate milestone) */}
+      {notif.type === "milestone_approved" && (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+            <p className="text-xs font-semibold text-emerald-700 mb-1">
+              Milestone {notif.milestoneIndex + 1} approved{notif.milestonePercentage ? ` · ${notif.milestonePercentage}%` : ""}
+            </p>
+            <p className="text-xs text-emerald-600">
+              {notif.milestoneName ? `"${notif.milestoneName}" has been approved` : "Your milestone has been approved"} and payment released.
+            </p>
+            {notif.paymentTx && (
+              <a
+                href={`https://solscan.io/tx/${notif.paymentTx}?cluster=devnet`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-emerald-700 underline underline-offset-2"
+              >
+                <ExternalLink size={11} />
+                View payment tx →
+              </a>
+            )}
+          </div>
+          {notif.nextEscrowTx && (
+            <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
+              <p className="text-xs font-semibold text-violet-700 mb-1">
+                Milestone {(notif.nextMilestoneIndex ?? 0) + 1}{notif.nextMilestoneName ? ` — ${notif.nextMilestoneName}` : ""} now funded
+              </p>
+              <p className="text-xs text-violet-600 leading-relaxed">
+                {notif.nextAmountUsdc ? `${(notif.nextAmountUsdc / 1_000_000).toFixed(2)} USDC` : "Funds"} locked in escrow for the next milestone. Complete it to unlock payment.
+              </p>
+              <a
+                href={`https://solscan.io/tx/${notif.nextEscrowTx}?cluster=devnet`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-violet-700 underline underline-offset-2"
+              >
+                <ExternalLink size={11} />
+                View escrow tx →
+              </a>
+            </div>
+          )}
+          {onGoToActiveGigs && (
+            <button
+              onClick={onGoToActiveGigs}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80"
+            >
+              View in Active Gigs →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* milestone_funded body — shown to freelancer when next milestone escrow is funded */}
+      {notif.type === "milestone_funded" && (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <Shield size={14} className="text-violet-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-violet-700 mb-1">
+                  Milestone {notif.milestoneIndex + 1}{notif.milestoneName ? ` — ${notif.milestoneName}` : ""} ·{" "}
+                  {notif.amountUsdc ? `${(notif.amountUsdc / 1_000_000).toFixed(2)} USDC` : "Funds"} in escrow
+                </p>
+                <p className="text-xs text-violet-600 leading-relaxed">
+                  The client has funded this milestone. Complete the work and submit it for approval.
+                </p>
+                {notif.escrowTx && (
+                  <a
+                    href={`https://solscan.io/tx/${notif.escrowTx}?cluster=devnet`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-violet-700 underline underline-offset-2"
+                  >
+                    <ExternalLink size={11} />
+                    View escrow transaction
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+          {onGoToActiveGigs && (
+            <button
+              onClick={onGoToActiveGigs}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80"
+            >
+              View in Active Gigs →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* gig_cancelled body — shown to freelancer */}
+      {notif.type === "gig_cancelled" && (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle size={14} className="text-red-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-red-600 mb-1">
+                  {notif.fromName || "The client"} has cancelled this gig
+                </p>
+                <p className="text-xs text-red-500 leading-relaxed">
+                  The escrow funds have been refunded to their wallet. Any approved milestones already paid to you are not affected.
+                </p>
+                {notif.refundTx && (
+                  <a
+                    href={`https://solscan.io/tx/${notif.refundTx}?cluster=devnet`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-red-500 underline underline-offset-2"
+                  >
+                    <ExternalLink size={11} />
+                    View refund transaction
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+          {notif.fromEmail && (
+            <a
+              href={`mailto:${notif.fromEmail}`}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-black/20 px-4 py-2.5 text-sm font-medium text-black transition hover:bg-black hover:text-white"
+            >
+              <Mail size={15} />
+              Contact the client
+            </a>
+          )}
+        </div>
+      )}
+
       {/* negotiation_counter body — shown to the other party */}
       {notif.type === "negotiation_counter" && !notif.withdrawn && (
         <div className="mt-2 space-y-3">
@@ -464,7 +676,7 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
   );
 }
 
-export default function Notifications() {
+export default function Notifications({ setActivePage }) {
   const { user } = useAuth();
   const { publicKey, signTransaction } = useWallet();
   const { connection } = useConnection();
@@ -537,9 +749,10 @@ export default function Notifications() {
     return latestB - latestA;
   });
 
-  const CLIENT_TYPES = ["request_approved", "request_declined", "payment_released", "escrow_refunded", "negotiation_counter", "negotiation_split_agreed"];
+  const CLIENT_TYPES = ["request_approved", "request_declined", "payment_released", "escrow_refunded", "negotiation_counter", "negotiation_split_agreed", "milestone_approved", "milestone_funded", "gig_cancelled"];
+  const FREELANCER_TYPES = ["contact_request", "milestone_submitted"];
   const fromFreelancersList = projectList.filter((g) =>
-    g.notifications.some((n) => n.type === "contact_request")
+    g.notifications.some((n) => FREELANCER_TYPES.includes(n.type))
   );
   const fromClientsList = projectList.filter((g) =>
     g.notifications.some((n) => CLIENT_TYPES.includes(n.type))
@@ -547,7 +760,7 @@ export default function Notifications() {
   const visibleList = activeSection === "from_freelancers" ? fromFreelancersList : fromClientsList;
 
   const unreadFromFreelancers = notifications.filter(
-    (n) => n.type === "contact_request" && !n.read
+    (n) => FREELANCER_TYPES.includes(n.type) && !n.read
   ).length;
   const unreadFromClients = notifications.filter(
     (n) => CLIENT_TYPES.includes(n.type) && !n.read
@@ -747,7 +960,30 @@ export default function Notifications() {
       const budget = projectData?.budget;
       const currency = projectData?.currency;
 
+      // Determine agreed milestones (negotiated split takes priority over project milestones)
+      const agreedMilestones = notif.currentMilestoneSplit?.length > 0
+        ? notif.currentMilestoneSplit
+        : projectData?.milestones?.length > 0
+          ? projectData.milestones
+          : null;
+      const initialMilestoneStates = agreedMilestones
+        ? agreedMilestones.map(() => ({ status: "pending" }))
+        : [{ status: "pending" }];
+
+      // For USDC projects, block approval if wallet conditions aren't met
+      if (currency === "USDC" && budget) {
+        if (!publicKey) {
+          setEscrowError("Connect your Phantom wallet before approving — it's needed to fund the escrow. Look for the wallet button in the top-right corner.");
+          return;
+        }
+        if (!freelancerWallet) {
+          setEscrowError("This freelancer hasn't saved their Solana wallet address yet. Ask them to go to Profile, connect Phantom, and save their wallet address — then try approving again.");
+          return;
+        }
+      }
+
       const willAttemptEscrow = !!(publicKey && freelancerWallet && budget && currency === "USDC");
+      const hasMilestones = agreedMilestones && agreedMilestones.length > 0;
 
       const baseApproval = {
         status: "approved",
@@ -760,40 +996,85 @@ export default function Notifications() {
         updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), baseApproval),
       ]);
 
+      // Update contact_request with initial milestone state
+      await updateDoc(doc(db, "notifications", notif.id), {
+        status: "approved",
+        read: true,
+        milestoneStates: initialMilestoneStates,
+        ...(agreedMilestones ? { agreedMilestones } : {}),
+        ...(freelancerWallet ? { freelancerWalletAddress: freelancerWallet } : {}),
+      });
+
       let escrowTx = null;
+      let milestoneEscrows = null;
+
       if (willAttemptEscrow) {
         const freelancerKey = new PublicKey(freelancerWallet);
-        const amountUsdc = Math.round(Number(budget) * 1_000_000);
-        const tx = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, amountUsdc);
-        const sim = await connection.simulateTransaction(tx);
-        if (sim.value.err) {
-          const errJson = JSON.stringify(sim.value.err);
-          if (!errJson.includes("ProgramAccountNotFound")) {
-            setEscrowError(sim.value.logs?.join("\n") || errJson);
+        const totalAmountUsdc = Math.round(Number(budget) * 1_000_000);
+
+        if (hasMilestones) {
+          // Only fund milestone 0 at approval time — subsequent milestones funded as each is approved
+          const msProjectId = `${notif.projectId}_m0`;
+          const milestone0Amount = Math.round((agreedMilestones[0].percentage / 100) * totalAmountUsdc);
+          let tx;
+          try {
+            ({ tx } = await buildCreateEscrowTx(connection, publicKey, freelancerKey, msProjectId, milestone0Amount));
+          } catch (buildErr) {
+            setEscrowError(buildErr.message || "Failed to build escrow transaction");
             return;
           }
-        }
-        let sig;
-        try {
-          const signedTx = await signTransaction(tx);
-          sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
-        } catch (sendErr) {
-          const msg = sendErr.message || "";
-          if (!msg.includes("rejected") && !msg.includes("User rejected")) {
-            setEscrowError(msg || "Send failed");
+          let sig;
+          try {
+            const signedTx = await signTransaction(tx);
+            sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+          } catch (signErr) {
+            const msg = signErr.message || "";
+            if (!msg.includes("rejected") && !msg.includes("User rejected")) {
+              setEscrowError(msg || "Signing failed");
+            }
+            return;
           }
-          return;
+          milestoneEscrows = [{ projectId: msProjectId, tx: sig, amountUsdc: milestone0Amount, released: false }];
+          escrowTx = sig;
+          const escrowData = { escrowCreated: true, escrowTx: sig, approvedCount: increment(1) };
+          await Promise.all([
+            updateDoc(doc(db, "projects", notif.projectId), escrowData),
+            updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
+          ]);
+          await updateDoc(doc(db, "notifications", notif.id), {
+            escrowFunded: true,
+            escrowBudget: budget,
+            escrowTx: sig,
+            milestoneEscrows,
+          });
+        } else {
+          // Single escrow for full payment
+          const { tx } = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, totalAmountUsdc);
+          let sig;
+          try {
+            const signedTx = await signTransaction(tx);
+            sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+          } catch (sendErr) {
+            const msg = sendErr.message || "";
+            if (!msg.includes("rejected") && !msg.includes("User rejected")) {
+              setEscrowError(msg || "Send failed");
+            }
+            return;
+          }
+          escrowTx = sig;
+          const escrowData = { escrowCreated: true, escrowTx: sig, approvedCount: increment(1) };
+          await Promise.all([
+            updateDoc(doc(db, "projects", notif.projectId), escrowData),
+            updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
+          ]);
+          await updateDoc(doc(db, "notifications", notif.id), {
+            escrowFunded: true,
+            escrowBudget: budget,
+            escrowTx: sig,
+          });
         }
-        await connection.confirmTransaction(sig, "confirmed");
-        escrowTx = sig;
-        const escrowData = { escrowCreated: true, escrowTx: sig, approvedCount: increment(1) };
-        await Promise.all([
-          updateDoc(doc(db, "projects", notif.projectId), escrowData),
-          updateDoc(doc(db, "users", user.uid, "projectsAdded", notif.projectId), escrowData),
-        ]);
       }
 
-      await updateDoc(doc(db, "notifications", notif.id), { status: "approved", read: true });
       await addDoc(collection(db, "notifications"), {
         type: "request_approved",
         toUid: notif.fromUid,
@@ -802,14 +1083,17 @@ export default function Notifications() {
         fromName: user.displayName || user.email?.split("@")[0] || "User",
         projectId: notif.projectId,
         projectTitle: notif.projectTitle,
+        originalRequestId: notif.id,
         status: "approved",
         read: false,
         createdAt: serverTimestamp(),
-        ...(notif.currentMilestoneSplit?.length > 0 ? { agreedMilestones: notif.currentMilestoneSplit } : {}),
+        ...(agreedMilestones ? { agreedMilestones } : {}),
         ...(escrowTx ? { escrowTx, escrowBudget: budget } : {}),
+        ...(milestoneEscrows ? { milestoneEscrows } : {}),
       });
     } catch (e) {
       console.error("Approve error:", e);
+      setEscrowError(e?.message || "An unexpected error occurred. Please try again.");
     } finally {
       setProcessing(null);
     }
@@ -1128,6 +1412,7 @@ export default function Notifications() {
                 notif={notif}
                 processing={processing}
                 profileLoading={profileLoading}
+                walletConnected={!!publicKey}
                 onApprove={handleApprove}
                 onDeclineOpen={(n) => { setDeclineModal(n); setDeclineReason(""); }}
                 onMarkRead={markRead}
@@ -1145,6 +1430,16 @@ export default function Notifications() {
                 }}
                 onRejectNegotiation={handleRejectNegotiation}
                 onApproveOriginal={handleApproveFromSplitAgreed}
+                onGoToActiveGigs={
+                  setActivePage &&
+                  (notif.type === "request_approved" ||
+                   notif.type === "milestone_funded" ||
+                   notif.type === "milestone_approved" ||
+                   notif.type === "milestone_submitted" ||
+                   (notif.type === "contact_request" && notif.status === "approved"))
+                    ? () => setActivePage("Active Gigs")
+                    : undefined
+                }
               />
             ))}
           </div>

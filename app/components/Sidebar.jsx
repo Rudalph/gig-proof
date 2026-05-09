@@ -13,6 +13,7 @@ import {
   User,
   BriefcaseBusiness,
   Bell,
+  Zap,
 } from "lucide-react";
 
 import LogoutButton from "./Logout";
@@ -26,6 +27,7 @@ const navItems = [
   { label: "Hire Talent", href: "#", icon: UserRoundCheck },
   { label: "Open Jobs", href: "#", icon: FolderKanban },
   { label: "Work History", href: "#", icon: BriefcaseBusiness },
+  { label: "Active Gigs", href: "#", icon: Zap },
   { label: "Notifications", href: "#", icon: Bell },
   { label: "Settings", href: "#", icon: Settings },
   { label: "Profile", href: "#", icon: CircleUserRound },
