@@ -1,0 +1,22 @@
+services:
+  gig-proof:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - gigproof_node_modules:/app/node_modules
+      - gigproof_next:/app/.next
+    environment:
+      - SOLANA_KEYPAIR=${SOLANA_KEYPAIR}
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+      - NEXT_WEBPACK_USEPOLLING=1
+    command: npm run dev -- --webpack
+    restart: unless-stopped
+
+volumes:
+  gigproof_node_modules:
+  gigproof_next:
