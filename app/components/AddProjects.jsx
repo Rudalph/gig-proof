@@ -75,6 +75,140 @@ function parseTags(value) {
   return [...new Set(value.split(",").map((t) => t.trim()).filter(Boolean))];
 }
 
+function MilestoneModal({ open, initial, onSave, onClose }) {
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => {
+    if (open) {
+      setRows(
+        initial && initial.length >= 2
+          ? initial.map((r) => ({ ...r }))
+          : [
+              { description: "", percentage: "" },
+              { description: "Final payment after review and verification", percentage: "" },
+            ]
+      );
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const total = rows.reduce((s, r) => s + (Number(r.percentage) || 0), 0);
+  const isValid =
+    rows.length >= 2 &&
+    rows.every((r) => r.description.trim() && Number(r.percentage) > 0) &&
+    total === 100;
+
+  const update = (i, field, val) =>
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
+
+  const addRow = () => {
+    if (rows.length >= 4) return;
+    setRows((prev) => [
+      ...prev.slice(0, -1),
+      { description: "", percentage: "" },
+      prev[prev.length - 1],
+    ]);
+  };
+
+  const removeRow = (i) => {
+    if (rows.length <= 2 || i === rows.length - 1) return;
+    setRows((prev) => prev.filter((_, idx) => idx !== i));
+  };
+
+  if (!open) return null;
+
+  const PLACEHOLDER_DESCS = ["Wireframes and design approved", "Core development complete", "Testing and QA done"];
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white text-black shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-black/10 p-5">
+          <div>
+            <h2 className="text-lg font-semibold">Configure Milestones</h2>
+            <p className="text-xs text-black/40 mt-0.5">Up to 4 milestones — percentages must total exactly 100%</p>
+          </div>
+          <button onClick={onClose} className="rounded-full p-2 transition hover:bg-black hover:text-white">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="max-h-[55vh] overflow-y-auto p-5 space-y-3">
+          {rows.map((row, i) => {
+            const isLast = i === rows.length - 1;
+            return (
+              <div key={i} className={`rounded-xl border p-4 space-y-3 ${isLast ? "border-black/20 bg-black/[0.02]" : "border-black/10 bg-white"}`}>
+                <div className="flex items-center gap-2">
+                  <span className="h-6 w-6 shrink-0 rounded-full bg-black text-white text-xs flex items-center justify-center font-semibold">{i + 1}</span>
+                  <p className="text-xs font-semibold text-black/50 uppercase tracking-wide">{isLast ? "Final Payment" : `Milestone ${i + 1}`}</p>
+                  {!isLast && rows.length > 2 && (
+                    <button type="button" onClick={() => removeRow(i)} className="ml-auto rounded-lg p-1 text-black/25 transition hover:bg-red-50 hover:text-red-500">
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  placeholder={isLast ? "e.g. Full review and final delivery approved" : PLACEHOLDER_DESCS[i] || "Describe this milestone"}
+                  value={row.description}
+                  onChange={(e) => update(i, "description", e.target.value)}
+                  className="w-full rounded-xl border border-black/15 bg-white text-black px-3 py-2 text-sm outline-none focus:border-black"
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="99"
+                    placeholder="0"
+                    value={row.percentage}
+                    onChange={(e) => update(i, "percentage", e.target.value === "" ? "" : String(Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 0))))}
+                    className="w-20 rounded-xl border border-black/15 bg-white text-black px-3 py-2 text-sm text-center outline-none focus:border-black"
+                  />
+                  <span className="text-sm text-black/50">% of total budget released</span>
+                </div>
+              </div>
+            );
+          })}
+
+          {rows.length < 4 && (
+            <button
+              type="button"
+              onClick={addRow}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-black/20 py-2.5 text-sm text-black/40 transition hover:border-black/40 hover:text-black/60"
+            >
+              <Plus size={14} />
+              Add milestone
+            </button>
+          )}
+        </div>
+
+        <div className="border-t border-black/10 p-5">
+          <div className={`mb-4 flex items-center justify-between rounded-xl px-4 py-3 ${
+            total === 100 ? "bg-emerald-50 border border-emerald-100" : total > 100 ? "bg-red-50 border border-red-100" : "bg-black/5"
+          }`}>
+            <span className={`text-sm font-medium ${total === 100 ? "text-emerald-700" : total > 100 ? "text-red-600" : "text-black/60"}`}>Total</span>
+            <span className={`text-base font-bold ${total === 100 ? "text-emerald-700" : total > 100 ? "text-red-600" : "text-black/70"}`}>
+              {total}%
+              {total === 100 && " ✓"}
+              {total > 100 && " — exceeds 100%"}
+              {total < 100 && total > 0 && ` — ${100 - total}% remaining`}
+            </span>
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-black/20 px-4 py-2.5 text-sm font-medium transition hover:bg-black/5">Cancel</button>
+            <button
+              type="button"
+              onClick={() => { onSave(rows.map((r) => ({ description: r.description.trim(), percentage: Number(r.percentage) }))); onClose(); }}
+              disabled={!isValid}
+              className="flex-1 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80 disabled:opacity-40"
+            >
+              Save Milestones
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AddProjects({ prefill, onPrefillConsumed }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -95,6 +229,9 @@ export default function AddProjects({ prefill, onPrefillConsumed }) {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [freelancerCount, setFreelancerCount] = useState(1);
+  const [paymentType, setPaymentType] = useState("full");
+  const [milestones, setMilestones] = useState([]);
+  const [showMilestoneModal, setShowMilestoneModal] = useState(false);
 
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
@@ -188,6 +325,9 @@ export default function AddProjects({ prefill, onPrefillConsumed }) {
     setStartTime("");
     setEndTime("");
     setFreelancerCount(1);
+    setPaymentType("full");
+    setMilestones([]);
+    setShowMilestoneModal(false);
   };
 
   const handleSubmit = async (e) => {
@@ -203,6 +343,18 @@ export default function AddProjects({ prefill, onPrefillConsumed }) {
     if (parseTags(tagsInput).length === 0) {
       toast("Please add at least one tag.", "error");
       return;
+    }
+
+    if (paymentType === "milestone") {
+      if (milestones.length < 2) {
+        toast("Please configure at least 2 milestones.", "error");
+        return;
+      }
+      const total = milestones.reduce((s, m) => s + Number(m.percentage || 0), 0);
+      if (total !== 100) {
+        toast("Milestone percentages must total exactly 100%.", "error");
+        return;
+      }
     }
 
     setLoading(true);
@@ -226,6 +378,8 @@ export default function AddProjects({ prefill, onPrefillConsumed }) {
       tags: parseTags(tagsInput),
       requirements,
       freelancerCount: Number(freelancerCount) || 1,
+      paymentType,
+      ...(paymentType === "milestone" ? { milestones } : {}),
       approvedCount: 0,
       status: "open",
       createdAt: serverTimestamp(),
@@ -306,6 +460,13 @@ export default function AddProjects({ prefill, onPrefillConsumed }) {
           Add Project
         </button>
       )}
+
+      <MilestoneModal
+        open={showMilestoneModal}
+        initial={milestones}
+        onSave={(saved) => setMilestones(saved)}
+        onClose={() => setShowMilestoneModal(false)}
+      />
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -440,6 +601,64 @@ export default function AddProjects({ prefill, onPrefillConsumed }) {
                 <p className="mt-1 text-xs text-black/40">
                   {freelancerCount === 1 ? "1 freelancer needed" : `${freelancerCount} freelancers needed`}
                 </p>
+              </div>
+
+              {/* Payment schedule */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-sm font-medium">Payment Schedule</label>
+                    <p className="mt-0.5 text-xs text-black/40">
+                      {paymentType === "full"
+                        ? "100% paid upon completion"
+                        : milestones.length > 0
+                        ? `${milestones.length} milestone${milestones.length !== 1 ? "s" : ""} configured`
+                        : "Milestone mode — configure below"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (paymentType === "full") {
+                        setPaymentType("milestone");
+                        setShowMilestoneModal(true);
+                      } else {
+                        setPaymentType("full");
+                        setMilestones([]);
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
+                      paymentType === "milestone" ? "bg-black" : "bg-black/20"
+                    }`}
+                    title={paymentType === "full" ? "Switch to milestone payments" : "Switch to full payment"}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+                      paymentType === "milestone" ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                </div>
+                {paymentType === "milestone" && milestones.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-black/10 bg-black/[0.02] p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-medium text-black/55">Milestone breakdown</p>
+                      <button type="button" onClick={() => setShowMilestoneModal(true)} className="text-xs text-black underline underline-offset-2">Edit</button>
+                    </div>
+                    <div className="space-y-1.5">
+                      {milestones.map((m, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-[10px] font-semibold text-black/60">{i + 1}</span>
+                          <p className="flex-1 text-xs text-black/60 truncate">{m.description}</p>
+                          <span className="shrink-0 text-xs font-bold text-black">{m.percentage}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {paymentType === "milestone" && milestones.length === 0 && (
+                  <button type="button" onClick={() => setShowMilestoneModal(true)} className="mt-2 text-xs text-black/50 underline underline-offset-2">
+                    Configure milestones
+                  </button>
+                )}
               </div>
 
               <div>

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   collection, query, where, onSnapshot,
-  updateDoc, doc, addDoc, serverTimestamp, getDoc, increment, deleteDoc,
+  updateDoc, doc, addDoc, serverTimestamp, getDoc, increment, deleteDoc, arrayUnion,
 } from "firebase/firestore";
 import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
@@ -33,7 +33,23 @@ function timeAgo(ts) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function NotificationCard({ notif, processing, profileLoading, onApprove, onDeclineOpen, onMarkRead, onViewProfile }) {
+function MilestoneSplitDisplay({ split, label }) {
+  if (!split || split.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3 space-y-1.5">
+      {label && <p className="text-xs font-semibold text-black/50 uppercase tracking-wide mb-2">{label}</p>}
+      {split.map((m, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-[10px] font-semibold text-black/60">{i + 1}</span>
+          <p className="flex-1 text-xs text-black/65 truncate">{m.description}</p>
+          <span className="shrink-0 text-xs font-bold text-black">{m.percentage}%</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NotificationCard({ notif, processing, profileLoading, onApprove, onDeclineOpen, onMarkRead, onViewProfile, onClientCounter, onFreelancerAccept, onFreelancerCounter, onRejectNegotiation, onApproveOriginal }) {
   return (
     <div
       className={`rounded-2xl border p-5 transition ${
@@ -50,6 +66,18 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
                 <p className="text-sm font-semibold text-black">{notif.fromName || notif.fromEmail}</p>
                 <p className="text-xs text-black/40">is interested in this job</p>
               </>
+            ) : notif.type === "negotiation_counter" ? (
+              <div className={`flex items-center gap-1.5 text-sm font-semibold ${notif.withdrawn ? "text-red-500" : "text-amber-600"}`}>
+                {notif.withdrawn ? (
+                  <><XCircle size={15} /> {notif.fromName || "Freelancer"} withdrew the application</>
+                ) : (
+                  <><AlertTriangle size={15} /> {notif.fromName || "Client"} countered the milestone split</>
+                )}
+              </div>
+            ) : notif.type === "negotiation_split_agreed" ? (
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
+                <CheckCircle2 size={15} /> {notif.fromName || "Freelancer"} accepted the milestone split
+              </div>
             ) : (
               <div
                 className={`flex items-center gap-1.5 text-sm font-semibold ${
@@ -93,6 +121,43 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
               &ldquo;{notif.message}&rdquo;
             </p>
           )}
+
+          {/* Negotiation status badge */}
+          {notif.negotiationStatus === "countered_by_freelancer" && (
+            <div className="mb-3 flex items-center gap-1.5 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2">
+              <AlertTriangle size={13} className="text-amber-600 shrink-0" />
+              <span className="text-xs font-semibold text-amber-700">Freelancer proposed a different milestone split</span>
+            </div>
+          )}
+          {notif.negotiationStatus === "countered_by_client" && (
+            <div className="mb-3 flex items-center gap-1.5 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2">
+              <AlertTriangle size={13} className="text-amber-600 shrink-0" />
+              <span className="text-xs font-semibold text-amber-700">You sent a counter-proposal — waiting for freelancer&apos;s response</span>
+            </div>
+          )}
+          {notif.negotiationStatus === "split_agreed" && (
+            <div className="mb-3 flex items-center gap-1.5 rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
+              <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+              <span className="text-xs font-semibold text-emerald-700">Milestone split agreed — approve to hire</span>
+            </div>
+          )}
+          {notif.negotiationStatus === "rejected" && (
+            <div className="mb-3 flex items-center gap-1.5 rounded-xl bg-red-50 border border-red-100 px-3 py-2">
+              <XCircle size={13} className="text-red-500 shrink-0" />
+              <span className="text-xs font-semibold text-red-600">Negotiation withdrawn by freelancer</span>
+            </div>
+          )}
+
+          {/* Show proposed milestone split */}
+          {notif.currentMilestoneSplit?.length > 0 && notif.negotiationStatus !== "rejected" && (
+            <div className="mb-3">
+              <MilestoneSplitDisplay
+                split={notif.currentMilestoneSplit}
+                label={notif.negotiationStatus === "split_agreed" ? "Agreed split" : "Proposed split"}
+              />
+            </div>
+          )}
+
           <div className="mb-4">
             <button
               onClick={() => onViewProfile(notif)}
@@ -103,7 +168,8 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
               View Profile
             </button>
           </div>
-          {notif.status === "pending" ? (
+
+          {notif.status === "pending" && notif.negotiationStatus !== "rejected" ? (
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => onApprove(notif)}
@@ -113,6 +179,16 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
                 <Check size={13} />
                 Approve
               </button>
+              {/* Show Counter button only if milestones active, split not yet agreed, and not already waiting on freelancer */}
+              {notif.currentMilestoneSplit?.length > 0 && notif.negotiationStatus !== "split_agreed" && notif.negotiationStatus !== "countered_by_client" && (
+                <button
+                  onClick={() => onClientCounter(notif)}
+                  disabled={processing === notif.id}
+                  className="flex items-center gap-1.5 rounded-xl border border-black/20 px-4 py-2 text-xs font-medium text-black/60 transition hover:border-black hover:text-black disabled:opacity-50"
+                >
+                  Counter
+                </button>
+              )}
               <button
                 onClick={() => onDeclineOpen(notif)}
                 disabled={processing === notif.id}
@@ -134,7 +210,9 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
             <div className="flex items-center justify-between gap-2">
               <div
                 className={`flex items-center gap-1.5 text-xs font-medium ${
-                  notif.status === "approved" ? "text-emerald-600" : "text-red-500"
+                  notif.status === "approved" ? "text-emerald-600"
+                  : notif.negotiationStatus === "rejected" ? "text-red-500"
+                  : "text-red-500"
                 }`}
               >
                 {notif.status === "approved" ? (
@@ -159,6 +237,9 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
       {/* request_approved body */}
       {notif.type === "request_approved" && (
         <div className="mt-2 space-y-2">
+          {notif.agreedMilestones?.length > 0 && (
+            <MilestoneSplitDisplay split={notif.agreedMilestones} label="Agreed milestone split" />
+          )}
           <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
             <p className="text-xs text-emerald-700 font-medium mb-1.5">
               You can now contact the publisher directly:
@@ -293,6 +374,92 @@ function NotificationCard({ notif, processing, profileLoading, onApprove, onDecl
           )}
         </div>
       )}
+
+      {/* negotiation_counter body — shown to the other party */}
+      {notif.type === "negotiation_counter" && !notif.withdrawn && (
+        <div className="mt-2 space-y-3">
+          {notif.message && (
+            <p className="rounded-xl bg-black/4 px-4 py-3 text-sm text-black/70 leading-relaxed">
+              &ldquo;{notif.message}&rdquo;
+            </p>
+          )}
+          {notif.proposedSplit?.length > 0 && (
+            <MilestoneSplitDisplay split={notif.proposedSplit} label="Proposed split" />
+          )}
+          {notif.status !== "processed" ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => onFreelancerAccept(notif)}
+                disabled={processing === notif.id}
+                className="flex items-center gap-1.5 rounded-xl bg-black px-4 py-2 text-xs font-medium text-white transition hover:bg-black/80 disabled:opacity-50"
+              >
+                <Check size={13} />
+                Accept Split
+              </button>
+              <button
+                onClick={() => onFreelancerCounter(notif)}
+                disabled={processing === notif.id}
+                className="flex items-center gap-1.5 rounded-xl border border-black/20 px-4 py-2 text-xs font-medium text-black/60 transition hover:border-black hover:text-black disabled:opacity-50"
+              >
+                Counter
+              </button>
+              <button
+                onClick={() => onRejectNegotiation(notif, "freelancer")}
+                disabled={processing === notif.id}
+                className="flex items-center gap-1.5 rounded-xl border border-black/15 px-4 py-2 text-xs font-medium text-black/60 transition hover:border-red-300 hover:text-red-500 disabled:opacity-50"
+              >
+                <X size={13} />
+                Withdraw
+              </button>
+            </div>
+          ) : (
+            <div className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium ${
+              notif.processedAction === "accepted" ? "bg-emerald-50 border border-emerald-100 text-emerald-700"
+              : notif.processedAction === "countered" ? "bg-amber-50 border border-amber-100 text-amber-700"
+              : "bg-red-50 border border-red-100 text-red-600"
+            }`}>
+              {notif.processedAction === "accepted" && <><CheckCircle2 size={13} /> You accepted this milestone split.</>}
+              {notif.processedAction === "countered" && <><AlertTriangle size={13} /> You sent a counter-proposal — waiting for the client.</>}
+              {notif.processedAction === "withdrawn" && <><XCircle size={13} /> You withdrew your application.</>}
+              {!notif.processedAction && <><Check size={13} /> You responded to this proposal.</>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {notif.type === "negotiation_counter" && notif.withdrawn && (
+        <div className="mt-2">
+          <p className="text-xs text-black/40">The freelancer has withdrawn their application.</p>
+        </div>
+      )}
+
+      {/* negotiation_split_agreed body — shown to client */}
+      {notif.type === "negotiation_split_agreed" && (
+        <div className="mt-2 space-y-3">
+          {notif.agreedSplit?.length > 0 && (
+            <MilestoneSplitDisplay split={notif.agreedSplit} label="Agreed milestone split" />
+          )}
+          {notif.status !== "processed" ? (
+            <>
+              <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
+                <p className="text-xs text-emerald-700 font-medium">
+                  Freelancer accepted your proposed split. Click below to hire them and fund the escrow.
+                </p>
+              </div>
+              <button
+                onClick={() => onApproveOriginal(notif)}
+                disabled={processing === notif.id}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 text-sm font-medium text-white transition hover:bg-black/80 disabled:opacity-50"
+              >
+                <Check size={15} />
+                {processing === notif.id ? "Opening Phantom…" : "Approve & Fund via Phantom"}
+              </button>
+            </>
+          ) : (
+            <p className="text-xs text-black/40">You have approved and funded this request.</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -314,6 +481,9 @@ export default function Notifications() {
   const [escrowError, setEscrowError] = useState(null);
   const [projectDetails, setProjectDetails] = useState({});
   const [activeSection, setActiveSection] = useState("from_freelancers");
+  const [counterModal, setCounterModal] = useState(null); // { notif, role: "client"|"freelancer" }
+  const [counterMessage, setCounterMessage] = useState("");
+  const [counterSplit, setCounterSplit] = useState([]);
 
   useEffect(() => {
     if (!user) return;
@@ -367,7 +537,7 @@ export default function Notifications() {
     return latestB - latestA;
   });
 
-  const CLIENT_TYPES = ["request_approved", "request_declined", "payment_released", "escrow_refunded"];
+  const CLIENT_TYPES = ["request_approved", "request_declined", "payment_released", "escrow_refunded", "negotiation_counter", "negotiation_split_agreed"];
   const fromFreelancersList = projectList.filter((g) =>
     g.notifications.some((n) => n.type === "contact_request")
   );
@@ -416,6 +586,152 @@ export default function Notifications() {
       console.error("Delete all error:", e);
     } finally {
       setBulkProcessing(null);
+    }
+  };
+
+  // Client sends a counter-proposal back to the freelancer
+  const handleClientCounter = async (notif, message, split) => {
+    setProcessing(notif.id);
+    try {
+      await updateDoc(doc(db, "notifications", notif.id), {
+        negotiationStatus: "countered_by_client",
+        currentMilestoneSplit: split,
+        lastCounteredBy: "client",
+        negotiationHistory: arrayUnion({
+          by: "client",
+          message,
+          split,
+          ts: new Date().toISOString(),
+        }),
+        read: true,
+      });
+      await addDoc(collection(db, "notifications"), {
+        type: "negotiation_counter",
+        toUid: notif.fromUid,
+        fromUid: user.uid,
+        fromEmail: user.email,
+        fromName: user.displayName || user.email?.split("@")[0] || "Client",
+        projectId: notif.projectId,
+        projectTitle: notif.projectTitle,
+        originalRequestId: notif.id,
+        message,
+        proposedSplit: split,
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Client counter error:", e);
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  // Freelancer accepts client's proposed split → notifies client, locks split_agreed
+  const handleFreelancerAcceptSplit = async (notif) => {
+    setProcessing(notif.id);
+    try {
+      // Mark the negotiation_counter notification as processed
+      await updateDoc(doc(db, "notifications", notif.id), { read: true, status: "processed", processedAction: "accepted" });
+      // Update the original contact_request
+      if (notif.originalRequestId) {
+        await updateDoc(doc(db, "notifications", notif.originalRequestId), {
+          negotiationStatus: "split_agreed",
+          currentMilestoneSplit: notif.proposedSplit,
+        });
+      }
+      // Notify client
+      await addDoc(collection(db, "notifications"), {
+        type: "negotiation_split_agreed",
+        toUid: notif.fromUid,
+        fromUid: user.uid,
+        fromEmail: user.email,
+        fromName: user.displayName || user.email?.split("@")[0] || "Freelancer",
+        projectId: notif.projectId,
+        projectTitle: notif.projectTitle,
+        originalRequestId: notif.originalRequestId,
+        agreedSplit: notif.proposedSplit,
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Accept split error:", e);
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  // Freelancer sends a counter back to the client
+  const handleFreelancerCounter = async (notif, message, split) => {
+    setProcessing(notif.id);
+    try {
+      await updateDoc(doc(db, "notifications", notif.id), { read: true, status: "processed", processedAction: "countered" });
+      if (notif.originalRequestId) {
+        await updateDoc(doc(db, "notifications", notif.originalRequestId), {
+          negotiationStatus: "countered_by_freelancer",
+          currentMilestoneSplit: split,
+          lastCounteredBy: "freelancer",
+          negotiationHistory: arrayUnion({
+            by: "freelancer",
+            message,
+            split,
+            ts: new Date().toISOString(),
+          }),
+        });
+      }
+      // Notify client
+      await addDoc(collection(db, "notifications"), {
+        type: "negotiation_counter",
+        toUid: notif.fromUid,
+        fromUid: user.uid,
+        fromEmail: user.email,
+        fromName: user.displayName || user.email?.split("@")[0] || "Freelancer",
+        projectId: notif.projectId,
+        projectTitle: notif.projectTitle,
+        originalRequestId: notif.originalRequestId,
+        message,
+        proposedSplit: split,
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Freelancer counter error:", e);
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  // Either side rejects the negotiation entirely (withdraws application)
+  const handleRejectNegotiation = async (notif, role) => {
+    setProcessing(notif.id);
+    try {
+      if (role === "freelancer") {
+        // Freelancer withdraws — mark their counter notification processed, update original request
+        await updateDoc(doc(db, "notifications", notif.id), { read: true, status: "processed", processedAction: "withdrawn" });
+        if (notif.originalRequestId) {
+          await updateDoc(doc(db, "notifications", notif.originalRequestId), {
+            negotiationStatus: "rejected",
+            status: "declined",
+          });
+        }
+        // Notify client of withdrawal
+        await addDoc(collection(db, "notifications"), {
+          type: "negotiation_counter",
+          toUid: notif.fromUid,
+          fromUid: user.uid,
+          fromEmail: user.email,
+          fromName: user.displayName || user.email?.split("@")[0] || "Freelancer",
+          projectId: notif.projectId,
+          projectTitle: notif.projectTitle,
+          originalRequestId: notif.originalRequestId,
+          withdrawn: true,
+          read: false,
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.error("Reject negotiation error:", e);
+    } finally {
+      setProcessing(null);
     }
   };
 
@@ -489,12 +805,27 @@ export default function Notifications() {
         status: "approved",
         read: false,
         createdAt: serverTimestamp(),
+        ...(notif.currentMilestoneSplit?.length > 0 ? { agreedMilestones: notif.currentMilestoneSplit } : {}),
         ...(escrowTx ? { escrowTx, escrowBudget: budget } : {}),
       });
     } catch (e) {
       console.error("Approve error:", e);
     } finally {
       setProcessing(null);
+    }
+  };
+
+  // Called from negotiation_split_agreed card — fetches original contact_request and runs approve
+  const handleApproveFromSplitAgreed = async (splitAgreedNotif) => {
+    if (!splitAgreedNotif.originalRequestId) return;
+    try {
+      const snap = await getDoc(doc(db, "notifications", splitAgreedNotif.originalRequestId));
+      if (!snap.exists()) return;
+      const originalNotif = { id: snap.id, ...snap.data() };
+      await updateDoc(doc(db, "notifications", splitAgreedNotif.id), { read: true, status: "processed" });
+      await handleApprove(originalNotif);
+    } catch (e) {
+      console.error("Approve from split agreed error:", e);
     }
   };
 
@@ -801,8 +1132,107 @@ export default function Notifications() {
                 onDeclineOpen={(n) => { setDeclineModal(n); setDeclineReason(""); }}
                 onMarkRead={markRead}
                 onViewProfile={handleViewProfile}
+                onClientCounter={(n) => {
+                  setCounterModal({ notif: n, role: "client" });
+                  setCounterMessage("");
+                  setCounterSplit((n.currentMilestoneSplit || []).map((m) => ({ ...m })));
+                }}
+                onFreelancerAccept={handleFreelancerAcceptSplit}
+                onFreelancerCounter={(n) => {
+                  setCounterModal({ notif: n, role: "freelancer" });
+                  setCounterMessage("");
+                  setCounterSplit((n.proposedSplit || []).map((m) => ({ ...m })));
+                }}
+                onRejectNegotiation={handleRejectNegotiation}
+                onApproveOriginal={handleApproveFromSplitAgreed}
               />
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Counter proposal modal */}
+      {counterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setCounterModal(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-white text-black shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-black/10 p-5">
+              <div>
+                <h2 className="text-lg font-semibold">Counter Proposal</h2>
+                <p className="text-xs text-black/40 mt-0.5">{counterModal.notif.projectTitle}</p>
+              </div>
+              <button onClick={() => setCounterModal(null)} className="rounded-full p-2 transition hover:bg-black hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Editable split */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium">Your Proposed Split</label>
+                  <span className={`text-xs font-semibold ${counterSplit.reduce((s, m) => s + Number(m.percentage), 0) === 100 ? "text-emerald-600" : "text-red-500"}`}>
+                    {counterSplit.reduce((s, m) => s + Number(m.percentage), 0)}% / 100%
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {counterSplit.map((m, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-xl border border-black/10 px-3 py-2">
+                      <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-[10px] font-semibold">{i + 1}</span>
+                      <p className="flex-1 text-xs text-black/70 truncate">{m.description}</p>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <input
+                          type="number"
+                          min="1"
+                          max="99"
+                          value={m.percentage}
+                          onChange={(e) => {
+                            const val = Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1));
+                            setCounterSplit((prev) => prev.map((r, idx) => idx === i ? { ...r, percentage: val } : r));
+                          }}
+                          className="w-14 rounded-lg border border-black/15 bg-white text-black px-2 py-1 text-xs text-center outline-none focus:border-black"
+                        />
+                        <span className="text-xs text-black/40">%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Message */}
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Message <span className="text-red-500">*</span></label>
+                <textarea
+                  rows="3"
+                  value={counterMessage}
+                  onChange={(e) => setCounterMessage(e.target.value)}
+                  placeholder="Explain your reasoning for the proposed split..."
+                  className="w-full rounded-xl border border-black/20 px-4 py-3 text-sm outline-none focus:border-black resize-none"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setCounterModal(null)} className="flex-1 rounded-xl border border-black/20 px-4 py-2.5 text-sm font-medium transition hover:bg-black/5">Cancel</button>
+                <button
+                  onClick={async () => {
+                    const { notif, role } = counterModal;
+                    const split = counterSplit;
+                    const msg = counterMessage.trim();
+                    if (!msg || counterSplit.reduce((s, m) => s + Number(m.percentage), 0) !== 100) return;
+                    setCounterModal(null);
+                    if (role === "client") {
+                      await handleClientCounter(notif, msg, split);
+                    } else {
+                      await handleFreelancerCounter(notif, msg, split);
+                    }
+                  }}
+                  disabled={
+                    !counterMessage.trim() ||
+                    counterSplit.reduce((s, m) => s + Number(m.percentage), 0) !== 100 ||
+                    processing === counterModal.notif.id
+                  }
+                  className="flex-1 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80 disabled:opacity-50"
+                >
+                  Send Counter
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -25,7 +25,11 @@
       "Bash(del \"c:\\\\Users\\\\achal\\\\Downloads\\\\gig-proof\\\\escrow\\\\programs\\\\escrow\\\\src\\\\instructions\\\\initialize.rs\")",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\achal\\\\Downloads\\\\gig-proof\" -Recurse -Directory)",
       "Bash(Select-Object -First 20)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(npx firebase *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\achal\\.claude\\projects\\c--Users-achal-gig-proof\\memory"
     ]
   }
 }

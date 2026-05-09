@@ -158,6 +158,7 @@ export default function OpenJobs() {
   const [contactModalJob, setContactModalJob] = useState(null);
   const [contactMessage, setContactMessage] = useState("");
   const [contactSending, setContactSending] = useState(false);
+  const [contactMilestoneSplit, setContactMilestoneSplit] = useState([]);
 
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt", "desc"));
@@ -280,6 +281,7 @@ export default function OpenJobs() {
     if (!user || !contactModalJob || !contactMessage.trim()) return;
     setContactSending(true);
     try {
+      const hasMilestones = contactModalJob.paymentType === "milestone" && contactMilestoneSplit.length > 0;
       await addDoc(collection(db, "notifications"), {
         type: "contact_request",
         toUid: contactModalJob.ownerId,
@@ -292,6 +294,17 @@ export default function OpenJobs() {
         status: "pending",
         read: false,
         createdAt: serverTimestamp(),
+        ...(hasMilestones ? {
+          negotiationStatus: "pending",
+          currentMilestoneSplit: contactMilestoneSplit,
+          lastCounteredBy: "freelancer",
+          negotiationHistory: [{
+            by: "freelancer",
+            message: contactMessage.trim(),
+            split: contactMilestoneSplit,
+            ts: new Date().toISOString(),
+          }],
+        } : {}),
         senderProfile: {
           bio: userProfile?.bio || "",
           professions: userProfile?.professions || [],
@@ -310,6 +323,7 @@ export default function OpenJobs() {
       setDeclinedJobs((prev) => { const next = new Map(prev); next.delete(contactModalJob.id); return next; });
       setContactModalJob(null);
       setContactMessage("");
+      setContactMilestoneSplit([]);
     } catch (error) {
       console.error("Contact error:", error);
     } finally {
@@ -734,6 +748,22 @@ export default function OpenJobs() {
                 </div>
               )}
 
+              {selectedJob.paymentType === "milestone" && selectedJob.milestones?.length > 0 && (
+                <div>
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">Milestone Payments</h3>
+                  <div className="space-y-2">
+                    {selectedJob.milestones.map((m, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-xl border border-black/10 px-4 py-2.5">
+                        <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-black text-white text-xs font-semibold">{i + 1}</span>
+                        <p className="flex-1 text-sm text-black/70">{m.description}</p>
+                        <span className="shrink-0 text-sm font-bold text-black">{m.percentage}%</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-xs text-black/40">Payments released as each milestone is completed</p>
+                </div>
+              )}
+
               {selectedJob.ownerId !== user?.uid && (
                 <div className="flex gap-3 pt-2 border-t border-black/10">
                   {(() => {
@@ -761,7 +791,15 @@ export default function OpenJobs() {
                     const label = cooldown ? `Try again in ${cooldown}` : isPending ? "Request Sent" : "Contact Publisher";
                     return (
                       <button
-                        onClick={() => { setContactModalJob(selectedJob); setContactMessage(""); }}
+                        onClick={() => {
+                          setContactModalJob(selectedJob);
+                          setContactMessage("");
+                          setContactMilestoneSplit(
+                            selectedJob.paymentType === "milestone" && selectedJob.milestones?.length > 0
+                              ? selectedJob.milestones.map((m) => ({ ...m }))
+                              : []
+                          );
+                        }}
                         disabled={isDisabled}
                         className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-black/80 disabled:opacity-60 disabled:cursor-default"
                       >
@@ -818,6 +856,40 @@ export default function OpenJobs() {
                 const msgOver = msgWords > MESSAGE_WORD_LIMIT;
                 return (
                   <div className="space-y-4">
+                    {/* Milestone split negotiation (only for milestone jobs) */}
+                    {contactModalJob.paymentType === "milestone" && contactMilestoneSplit.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium text-black/70">Proposed Milestone Split</label>
+                          <span className={`text-xs font-semibold ${contactMilestoneSplit.reduce((s, m) => s + Number(m.percentage), 0) === 100 ? "text-emerald-600" : "text-red-500"}`}>
+                            {contactMilestoneSplit.reduce((s, m) => s + Number(m.percentage), 0)}% / 100%
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {contactMilestoneSplit.map((m, i) => (
+                            <div key={i} className="flex items-center gap-2 rounded-xl border border-black/10 px-3 py-2">
+                              <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-[10px] font-semibold">{i + 1}</span>
+                              <p className="flex-1 text-xs text-black/70 truncate">{m.description}</p>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="99"
+                                  value={m.percentage}
+                                  onChange={(e) => {
+                                    const val = Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1));
+                                    setContactMilestoneSplit((prev) => prev.map((r, idx) => idx === i ? { ...r, percentage: val } : r));
+                                  }}
+                                  className="w-14 rounded-lg border border-black/15 bg-white text-black px-2 py-1 text-xs text-center outline-none focus:border-black"
+                                />
+                                <span className="text-xs text-black/40">%</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="mt-1.5 text-xs text-black/40">Adjust percentages to counter-propose a different split</p>
+                      </div>
+                    )}
                     <div>
                       <div className="mb-1 flex items-center justify-between">
                         <label className="text-sm font-medium text-black/70">
@@ -857,7 +929,10 @@ export default function OpenJobs() {
                       </button>
                       <button
                         onClick={handleContactSubmit}
-                        disabled={contactSending || !contactMessage.trim() || msgOver}
+                        disabled={
+                          contactSending || !contactMessage.trim() || msgOver ||
+                          (contactMilestoneSplit.length > 0 && contactMilestoneSplit.reduce((s, m) => s + Number(m.percentage), 0) !== 100)
+                        }
                         className="flex-1 rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black/80 disabled:opacity-50"
                       >
                         {contactSending ? "Sending..." : "Send Request"}
