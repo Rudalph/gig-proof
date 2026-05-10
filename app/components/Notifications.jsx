@@ -1016,9 +1016,9 @@ export default function Notifications({ setActivePage }) {
           // Only fund milestone 0 at approval time — subsequent milestones funded as each is approved
           const msProjectId = `${notif.projectId}_m0`;
           const milestone0Amount = Math.round((agreedMilestones[0].percentage / 100) * totalAmountUsdc);
-          let tx;
+          let tx, bh, lvbh;
           try {
-            ({ tx } = await buildCreateEscrowTx(connection, publicKey, freelancerKey, msProjectId, milestone0Amount));
+            ({ tx, blockhash: bh, lastValidBlockHeight: lvbh } = await buildCreateEscrowTx(connection, publicKey, freelancerKey, msProjectId, milestone0Amount));
           } catch (buildErr) {
             setEscrowError(buildErr.message || "Failed to build escrow transaction");
             return;
@@ -1027,6 +1027,10 @@ export default function Notifications({ setActivePage }) {
           try {
             const signedTx = await signTransaction(tx);
             sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+            const confirm = await connection.confirmTransaction(
+              { signature: sig, blockhash: bh, lastValidBlockHeight: lvbh }, "confirmed"
+            );
+            if (confirm.value.err) throw new Error(`Escrow creation failed on-chain: ${JSON.stringify(confirm.value.err)}`);
           } catch (signErr) {
             const msg = signErr.message || "";
             if (!msg.includes("rejected") && !msg.includes("User rejected")) {
@@ -1049,11 +1053,15 @@ export default function Notifications({ setActivePage }) {
           });
         } else {
           // Single escrow for full payment
-          const { tx } = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, totalAmountUsdc);
+          const { tx, blockhash: bh2, lastValidBlockHeight: lvbh2 } = await buildCreateEscrowTx(connection, publicKey, freelancerKey, notif.projectId, totalAmountUsdc);
           let sig;
           try {
             const signedTx = await signTransaction(tx);
             sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+            const confirm = await connection.confirmTransaction(
+              { signature: sig, blockhash: bh2, lastValidBlockHeight: lvbh2 }, "confirmed"
+            );
+            if (confirm.value.err) throw new Error(`Escrow creation failed on-chain: ${JSON.stringify(confirm.value.err)}`);
           } catch (sendErr) {
             const msg = sendErr.message || "";
             if (!msg.includes("rejected") && !msg.includes("User rejected")) {

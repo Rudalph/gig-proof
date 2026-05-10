@@ -6,21 +6,12 @@ import {
   Transaction,
 } from "@solana/web3.js";
 
-export const ESCROW_PROGRAM_ID = new PublicKey("fcJqPBDpSNmdRQZqmZxF2V1yJDtSEqn44wSCcjy6gcg");
+export const ESCROW_PROGRAM_ID = new PublicKey("4routMSHngGLj5DbzUozx3Q9f86a5E46SsTDtj7S3Vca");
 // ProgramData account required by BPFLoaderUpgradeable in Agave 3.x
-const ESCROW_PROGRAM_DATA = new PublicKey("Gpk1MiFBTni17LSapxGF7NsX3MNogGMvCAWCuKYgBbPi");
+const ESCROW_PROGRAM_DATA = new PublicKey("4kJWau4mHXcbDjkLG9n4Xn9ps4MbZDgBjSX8d8de3HsN");
 export const USDC_DEVNET_MINT = new PublicKey("AKZ8aZN6jLVLZbvvcTGvihz7sE6EzLm4vwD9cCcdkjDh");
 
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe8bSe");
-
-function getAssociatedTokenAddress(ownerKey, mintKey) {
-  const [address] = PublicKey.findProgramAddressSync(
-    [ownerKey.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mintKey.toBytes()],
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
-  return address;
-}
 
 async function disc(name) {
   const input = new TextEncoder().encode(`global:${name}`);
@@ -79,6 +70,11 @@ async function findTokenAccount(connection, ownerKey, mintKey) {
   const accounts = await connection.getTokenAccountsByOwner(ownerKey, { mint: mintKey });
   if (accounts.value.length === 0) throw new Error("No USDC token account found — fund the wallet first");
   return accounts.value[0].pubkey;
+}
+
+export function getEscrowPDA(clientKey, projectId) {
+  const [pda] = escrowPda(clientKey, projectId);
+  return pda;
 }
 
 export async function buildMilestoneEscrowTxs(connection, clientKey, freelancerKey, projectId, milestones, totalAmountUsdc) {
@@ -169,14 +165,78 @@ export async function buildCreateEscrowTx(connection, clientKey, freelancerKey, 
   return { tx, blockhash, lastValidBlockHeight };
 }
 
+// Creates the escrow AND releases it in one atomic transaction.
+// Used when an escrow is missing on-chain but needs to be funded and immediately paid out.
+export async function buildCreateAndReleaseTx(connection, clientKey, freelancerKey, projectId, amountUsdc) {
+  const [escrow] = escrowPda(clientKey, projectId);
+  const [vault] = vaultPda(escrow);
+  const { pubkey: clientAta, balance } = await findTokenAccountWithBalance(connection, clientKey, USDC_DEVNET_MINT);
+  if (balance < BigInt(amountUsdc)) {
+    const have = (Number(balance) / 1_000_000).toFixed(2);
+    const need = (amountUsdc / 1_000_000).toFixed(2);
+    throw new Error(`Insufficient devnet USDC — wallet has ${have} USDC but escrow requires ${need} USDC.`);
+  }
+
+  const freelancerAccts = await connection.getTokenAccountsByOwner(freelancerKey, { mint: USDC_DEVNET_MINT });
+  if (freelancerAccts.value.length === 0) throw new Error("Freelancer has no USDC token account — they need to set up a USDC wallet first.");
+  const freelancerAta = freelancerAccts.value[0].pubkey;
+
+  const createDisc = await disc("create_escrow");
+  const createArgs = encodeCreateEscrowArgs(projectId, amountUsdc, freelancerKey);
+  const createData = new Uint8Array(createDisc.length + createArgs.length);
+  createData.set(createDisc);
+  createData.set(createArgs, createDisc.length);
+
+  const createIx = new TransactionInstruction({
+    programId: ESCROW_PROGRAM_ID,
+    keys: [
+      { pubkey: clientKey, isSigner: true, isWritable: true },
+      { pubkey: freelancerKey, isSigner: false, isWritable: false },
+      { pubkey: escrow, isSigner: false, isWritable: true },
+      { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: clientAta, isSigner: false, isWritable: true },
+      { pubkey: USDC_DEVNET_MINT, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+      { pubkey: ESCROW_PROGRAM_DATA, isSigner: false, isWritable: false },
+    ],
+    data: createData,
+  });
+
+  const releaseDisc = await disc("release_payment");
+  const releaseIx = new TransactionInstruction({
+    programId: ESCROW_PROGRAM_ID,
+    keys: [
+      { pubkey: clientKey, isSigner: true, isWritable: true },
+      { pubkey: freelancerKey, isSigner: false, isWritable: true },
+      { pubkey: escrow, isSigner: false, isWritable: true },
+      { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: freelancerAta, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: ESCROW_PROGRAM_DATA, isSigner: false, isWritable: false },
+    ],
+    data: releaseDisc,
+  });
+
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  const tx = new Transaction({ feePayer: clientKey, recentBlockhash: blockhash });
+  tx.add(createIx);
+  tx.add(releaseIx);
+  return { tx, blockhash, lastValidBlockHeight };
+}
+
 export async function buildReleasePaymentTx(connection, clientKey, freelancerKey, projectId) {
   const [escrow] = escrowPda(clientKey, projectId);
   const [vault] = vaultPda(escrow);
-  const freelancerAta = getAssociatedTokenAddress(freelancerKey, USDC_DEVNET_MINT);
+
+  const freelancerAccts = await connection.getTokenAccountsByOwner(freelancerKey, { mint: USDC_DEVNET_MINT });
+  if (freelancerAccts.value.length === 0) throw new Error("Freelancer has no USDC token account — they need to set up a USDC wallet first.");
+  const freelancerAta = freelancerAccts.value[0].pubkey;
 
   const d = await disc("release_payment");
 
-  const ix = new TransactionInstruction({
+  const releaseIx = new TransactionInstruction({
     programId: ESCROW_PROGRAM_ID,
     keys: [
       { pubkey: clientKey, isSigner: true, isWritable: true },
@@ -192,7 +252,7 @@ export async function buildReleasePaymentTx(connection, clientKey, freelancerKey
 
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
   const tx = new Transaction({ feePayer: clientKey, recentBlockhash: blockhash });
-  tx.add(ix);
+  tx.add(releaseIx);
   return { tx, blockhash, lastValidBlockHeight };
 }
 

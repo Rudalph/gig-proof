@@ -770,13 +770,11 @@ function timeAgo(ts) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function shortDate(isoStr) {
-  if (!isoStr) return "";
-  return new Date(isoStr).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+function shortDate(val) {
+  if (!val) return "";
+  const d = val?.toDate ? val.toDate() : new Date(val);
+  if (isNaN(d)) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 // ─── status badge ─────────────────────────────────────────────────────────────
@@ -941,12 +939,13 @@ function ProjectRow({ project, defaultCurrency, rates, onRepost }) {
 // ─── freelancer timeline entry ────────────────────────────────────────────────
 
 function TimelineEntry({ gig, uid, isLast }) {
-  const completedDate = gig.completedAt ? new Date(gig.completedAt) : null;
-  const month = completedDate
-    ? completedDate.toLocaleString("default", { month: "short" }).toUpperCase()
+  const completedDate = gig.completedAt
+    ? (gig.completedAt?.toDate ? gig.completedAt.toDate() : new Date(gig.completedAt))
     : null;
-  const day = completedDate ? completedDate.getDate() : null;
-  const year = completedDate ? completedDate.getFullYear() : null;
+  const validDate = completedDate && !isNaN(completedDate);
+  const month = validDate ? completedDate.toLocaleString("default", { month: "short" }).toUpperCase() : null;
+  const day   = validDate ? completedDate.getDate() : null;
+  const year  = validDate ? completedDate.getFullYear() : null;
 
   return (
     <div className="flex gap-5">

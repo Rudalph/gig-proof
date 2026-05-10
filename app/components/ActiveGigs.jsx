@@ -9,7 +9,7 @@ import { db } from "@/app/lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { buildReleasePaymentTx, buildRefundTx, buildCreateEscrowTx } from "@/app/lib/escrow";
+import { buildReleasePaymentTx, buildRefundTx, buildCreateEscrowTx, buildCreateAndReleaseTx, getEscrowPDA } from "@/app/lib/escrow";
 import { uploadGigRecord, arweaveUrl } from "@/app/lib/arweave";
 import {
   CheckCircle2, Clock, Send, Shield, AlertTriangle, X, User, Zap, RotateCcw, Trash2,
@@ -240,13 +240,15 @@ export default function ActiveGigs() {
         if (freelancerAddr) {
           const freelancerKey = new PublicKey(freelancerAddr);
           const milestoneEscrows = contactRequest.milestoneEscrows;
+          const totalUsdc = Math.round(Number(contactRequest.escrowBudget) * 1_000_000);
 
           // Determine which escrow to release
           let escrowProjectId;
-          if (milestoneEscrows?.[milestoneIndex]) {
-            escrowProjectId = milestoneEscrows[milestoneIndex].projectId;
+          if (milestoneEscrows?.length > 0) {
+            escrowProjectId = milestoneEscrows[milestoneIndex]?.projectId
+              || `${contactRequest.projectId}_m${milestoneIndex}`;
           } else if (allApproved) {
-            escrowProjectId = contactRequest.projectId; // single escrow fallback
+            escrowProjectId = contactRequest.projectId;
           }
 
           if (escrowProjectId) {
@@ -255,33 +257,77 @@ export default function ActiveGigs() {
               const hasNextMilestone = !allApproved && milestones[nextIdx];
               const nextAlreadyFunded = milestoneEscrows?.[nextIdx]?.tx;
 
-              if (hasNextMilestone && !nextAlreadyFunded) {
-                // Build release + fund-next, sign together in one Phantom popup
-                const { tx: releaseTx } =
+              // Check on-chain: does the escrow to be released actually exist?
+              const escrowPDAKey = getEscrowPDA(publicKey, escrowProjectId);
+              const escrowInfo = await connection.getAccountInfo(escrowPDAKey);
+              const escrowExistsOnChain = escrowInfo !== null && escrowInfo.data.length > 0;
+
+              if (!escrowExistsOnChain) {
+                // Escrow missing on-chain — create + release in one atomic transaction
+                const msAmount = Math.round((milestones[milestoneIndex].percentage / 100) * totalUsdc);
+                const { tx: crTx, blockhash: crBh, lastValidBlockHeight: crLvbh } =
+                  await buildCreateAndReleaseTx(connection, publicKey, freelancerKey, escrowProjectId, msAmount);
+                const signedCR = await signTransaction(crTx);
+                const crSig = await connection.sendRawTransaction(signedCR.serialize(), { skipPreflight: true });
+                const crConfirm = await connection.confirmTransaction(
+                  { signature: crSig, blockhash: crBh, lastValidBlockHeight: crLvbh }, "confirmed"
+                );
+                if (crConfirm.value.err) throw new Error(`Release failed on-chain: ${JSON.stringify(crConfirm.value.err)}`);
+                paymentTx = crSig;
+
+                if (hasNextMilestone && !nextAlreadyFunded) {
+                  nextMsProjectId = `${contactRequest.projectId}_m${nextIdx}`;
+                  nextAmountUsdc = Math.round((milestones[nextIdx].percentage / 100) * totalUsdc);
+                  try {
+                    const { tx: nTx, blockhash: nBh, lastValidBlockHeight: nLvbh } =
+                      await buildCreateEscrowTx(connection, publicKey, freelancerKey, nextMsProjectId, nextAmountUsdc);
+                    const signedN = await signTransaction(nTx);
+                    const nSig = await connection.sendRawTransaction(signedN.serialize(), { skipPreflight: true });
+                    const nConfirm = await connection.confirmTransaction(
+                      { signature: nSig, blockhash: nBh, lastValidBlockHeight: nLvbh }, "confirmed"
+                    );
+                    if (!nConfirm.value.err) nextEscrowTx = nSig;
+                  } catch { /* next escrow funding failed — non-fatal, can retry */ }
+                }
+              } else if (hasNextMilestone && !nextAlreadyFunded) {
+                // Release current + fund next, sign together
+                const { tx: releaseTx, blockhash: rBh, lastValidBlockHeight: rLvbh } =
                   await buildReleasePaymentTx(connection, publicKey, freelancerKey, escrowProjectId);
                 nextMsProjectId = `${contactRequest.projectId}_m${nextIdx}`;
-                const totalUsdc = Math.round(Number(contactRequest.escrowBudget) * 1_000_000);
                 nextAmountUsdc = Math.round((milestones[nextIdx].percentage / 100) * totalUsdc);
-                const { tx: createNextTx } =
+                const { tx: createNextTx, blockhash: cBh, lastValidBlockHeight: cLvbh } =
                   await buildCreateEscrowTx(connection, publicKey, freelancerKey, nextMsProjectId, nextAmountUsdc);
 
                 const [signedRelease, signedCreate] = await signAllTransactions([releaseTx, createNextTx]);
 
                 const releaseSig = await connection.sendRawTransaction(signedRelease.serialize(), { skipPreflight: true });
+                const releaseConfirm = await connection.confirmTransaction(
+                  { signature: releaseSig, blockhash: rBh, lastValidBlockHeight: rLvbh }, "confirmed"
+                );
+                if (releaseConfirm.value.err) throw new Error(`Release failed on-chain: ${JSON.stringify(releaseConfirm.value.err)}`);
                 paymentTx = releaseSig;
 
                 const createSig = await connection.sendRawTransaction(signedCreate.serialize(), { skipPreflight: true });
-                nextEscrowTx = createSig;
+                const createConfirm = await connection.confirmTransaction(
+                  { signature: createSig, blockhash: cBh, lastValidBlockHeight: cLvbh }, "confirmed"
+                );
+                if (!createConfirm.value.err) nextEscrowTx = createSig;
+                else throw new Error(`Next milestone escrow funding failed: ${JSON.stringify(createConfirm.value.err)}`);
               } else {
                 // Last milestone (or next already funded): just release
-                const { tx } =
+                const { tx, blockhash: rBh, lastValidBlockHeight: rLvbh } =
                   await buildReleasePaymentTx(connection, publicKey, freelancerKey, escrowProjectId);
                 const signedTx = await signTransaction(tx);
                 const sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+                const confirm = await connection.confirmTransaction(
+                  { signature: sig, blockhash: rBh, lastValidBlockHeight: rLvbh }, "confirmed"
+                );
+                if (confirm.value.err) throw new Error(`Release failed on-chain: ${JSON.stringify(confirm.value.err)}`);
                 paymentTx = sig;
               }
             } catch (releaseErr) {
-              const msg = releaseErr.message || "";
+              console.error("Escrow release error:", releaseErr);
+              const msg = releaseErr?.message || String(releaseErr) || "";
               if (!msg.includes("rejected") && !msg.includes("User rejected")) {
                 setReleaseError(msg || "Escrow release failed");
               }
@@ -316,13 +362,19 @@ export default function ActiveGigs() {
       const isFullPayment = allApproved && paymentTx;
       if (isFullPayment) {
         try {
+          const freelancerWallet = contactRequest.freelancerWalletAddress || contactRequest.approvedFreelancerWallet || null;
+          const clientWallet = publicKey?.toString() || null;
           const record = {
             projectId: contactRequest.projectId,
             projectTitle: contactRequest.projectTitle,
             clientUid: user.uid,
             freelancerUid: contactRequest.fromUid,
+            clientWallet,
+            freelancerWallet,
             budget: contactRequest.escrowBudget,
             currency: "USDC",
+            description: contactRequest.description || "",
+            tags: contactRequest.tags || [],
             milestones: milestones.map((m, i) => ({
               description: m.description,
               percentage: m.percentage,
@@ -333,30 +385,30 @@ export default function ActiveGigs() {
             paymentTx,
           };
           const arweaveTxId = await uploadGigRecord(record);
+          const sharedFields = {
+            projectId: contactRequest.projectId,
+            projectTitle: contactRequest.projectTitle,
+            budget: contactRequest.escrowBudget,
+            currency: "USDC",
+            platform: "GigProof",
+            type: "completed_gig",
+            description: contactRequest.description || "",
+            tags: contactRequest.tags || [],
+            clientWallet,
+            freelancerWallet,
+            completedAt: new Date().toISOString(),
+            arweaveTx: arweaveTxId,
+            arweaveUrl: arweaveUrl(arweaveTxId),
+            paymentTx,
+            milestones: record.milestones,
+          };
           await setDoc(
             doc(db, "users", contactRequest.fromUid, "completedGigs", contactRequest.projectId),
-            {
-              projectTitle: contactRequest.projectTitle,
-              budget: contactRequest.escrowBudget,
-              currency: "USDC",
-              completedAt: serverTimestamp(),
-              arweaveTx: arweaveTxId,
-              arweaveUrl: arweaveUrl(arweaveTxId),
-              paymentTx,
-            }
+            sharedFields
           );
           await setDoc(
             doc(db, "users", user.uid, "completedGigs", contactRequest.projectId),
-            {
-              projectTitle: contactRequest.projectTitle,
-              budget: contactRequest.escrowBudget,
-              currency: "USDC",
-              completedAt: serverTimestamp(),
-              arweaveTx: arweaveTxId,
-              arweaveUrl: arweaveUrl(arweaveTxId),
-              paymentTx,
-              role: "client",
-            }
+            { ...sharedFields, role: "client" }
           );
         } catch (arweaveErr) {
           console.error("Arweave upload failed (non-fatal):", arweaveErr);

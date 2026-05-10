@@ -99,11 +99,12 @@ export default function GigRecordPage() {
     );
   }
 
-  const completedDate = gig.completedAt
-    ? new Date(gig.completedAt).toLocaleDateString("en-GB", {
-        day: "numeric", month: "long", year: "numeric",
-      })
-    : null;
+  const completedDate = (() => {
+    if (!gig.completedAt) return null;
+    const d = gig.completedAt?.toDate ? gig.completedAt.toDate() : new Date(gig.completedAt);
+    if (isNaN(d)) return null;
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  })();
 
   return (
     <div className="min-h-screen bg-[#f7f7f7] px-4 py-12">
@@ -189,6 +190,34 @@ export default function GigRecordPage() {
             </div>
           </div>
         </div>
+
+        {/* Milestones */}
+        {gig.milestones?.length > 0 && (
+          <div className="rounded-2xl border border-black/8 bg-white px-6 py-5 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-black/35">Milestones</p>
+            <div className="space-y-2">
+              {gig.milestones.map((m, i) => (
+                <div key={i} className="flex items-center gap-3 py-2 border-b border-black/5 last:border-0">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100">
+                    <CheckCircle2 size={13} className="text-emerald-600" />
+                  </div>
+                  <p className="flex-1 text-sm text-black/80">{m.description}</p>
+                  <span className="text-xs font-semibold text-black/50">{m.percentage}%</span>
+                  {m.releaseTx && (
+                    <a
+                      href={`https://solscan.io/tx/${m.releaseTx}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-mono text-black/35 hover:text-black transition truncate max-w-[120px]"
+                    >
+                      {m.releaseTx.slice(0, 8)}…
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* On-chain proof */}
         <div className="rounded-2xl border border-black/8 bg-white px-6 py-5 space-y-3">
