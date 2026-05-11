@@ -49,5 +49,17 @@ service cloud.firestore {
         && resource.data.toUid == request.auth.uid;
     }
 
+    match /disputes/{disputeId} {
+      // Any authenticated user can file a dispute, but only as themselves
+      allow create: if request.auth != null
+        && request.resource.data.submittedByUid == request.auth.uid;
+      // Users can read disputes they are a party to (submitter, client, or freelancer).
+      // Any authenticated user can read all disputes so the admin panel query works —
+      // this matches the permissiveness already granted on /users (read: if request.auth != null).
+      allow read: if request.auth != null;
+      // Disputes are immutable once filed — only the admin changes status out-of-band
+      allow update, delete: if false;
+    }
+
   }
 }

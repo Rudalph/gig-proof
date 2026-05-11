@@ -89,6 +89,222 @@ function PlaceholderCard({ icon, title, body }) {
   );
 }
 
+// ─── Chart helpers ────────────────────────────────────────────────────────────
+
+const CRYPTO_USD = new Set(["USDC", "SOL"]);
+const CUR_SYM = {
+  EUR:"€", USD:"$", GBP:"£", INR:"₹", JPY:"¥",
+  CAD:"CA$", AUD:"A$", SGD:"S$", CHF:"CHF ", BRL:"R$",
+  MXN:"MX$", KRW:"₩", USDC:"", SOL:"",
+};
+
+function toDefaultCurrency(amount, fromCur, toCur, rates) {
+  const num = parseFloat(amount);
+  if (!num || isNaN(num)) return 0;
+  const from = CRYPTO_USD.has(fromCur) ? "USD" : (fromCur || "USD");
+  const to   = CRYPTO_USD.has(toCur)  ? "USD" : (toCur  || "USD");
+  if (from === to) return num;
+  const rf = from === "EUR" ? 1 : (rates?.[from] || 1);
+  const rt = to   === "EUR" ? 1 : (rates?.[to]   || 1);
+  return (num / rf) * rt;
+}
+
+function fmtAmt(val, sym) {
+  if (!val || val === 0) return `${sym}0`;
+  if (val >= 1000) return `${sym}${(val / 1000).toFixed(1)}k`;
+  return `${sym}${val < 1 ? val.toFixed(2) : Math.round(val).toLocaleString()}`;
+}
+
+function dayKey(val) {
+  if (!val) return null;
+  const d = val?.toDate ? val.toDate() : new Date(val);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function EarningsChart({ completedGigs, clientJobs, primaryRole, defaultCurrency, rates }) {
+  const isFreelancer = primaryRole === "Freelancer" || primaryRole === "Both";
+  const [chartMode, setChartMode] = useState(isFreelancer ? "freelancer" : "client");
+  const [selected, setSelected]   = useState(null);
+
+  const DAYS = 30;
+  const today = new Date();
+  const days = Array.from({ length: DAYS }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() - (DAYS - 1 - i));
+    return d.toISOString().slice(0, 10);
+  });
+
+  const txByDay = Object.fromEntries(days.map(d => [d, []]));
+
+  if (chartMode === "freelancer") {
+    completedGigs.forEach(gig => {
+      const k = dayKey(gig.completedAt);
+      if (k && txByDay[k]) {
+        txByDay[k].push({
+          title: gig.projectTitle || "Project",
+          rawAmount: `${gig.budget} ${gig.currency || "USDC"}`,
+          converted: toDefaultCurrency(gig.budget, gig.currency, defaultCurrency, rates),
+        });
+      }
+    });
+  } else {
+    clientJobs.filter(j => j.escrowCreated).forEach(job => {
+      const k = dayKey(job.createdAt);
+      if (k && txByDay[k]) {
+        txByDay[k].push({
+          title: job.title || "Project",
+          rawAmount: `${job.budget} ${job.currency || "USDC"}`,
+          converted: toDefaultCurrency(job.budget, job.currency, defaultCurrency, rates),
+        });
+      }
+    });
+  }
+
+  const data = days.map(day => ({
+    day,
+    txs: txByDay[day],
+    total: txByDay[day].reduce((s, t) => s + t.converted, 0),
+  }));
+
+  const maxVal  = Math.max(...data.map(d => d.total), 0.01);
+  const hasData = data.some(d => d.total > 0);
+  const sym     = CUR_SYM[defaultCurrency] ?? (defaultCurrency + " ");
+
+  // SVG layout
+  const W = 640, H = 200;
+  const PL = 54, PR = 16, PT = 44, PB = 28;
+  const pw = W - PL - PR, ph = H - PT - PB;
+
+  const xi = i => PL + (i / (DAYS - 1)) * pw;
+  const yi = v => PT + ph - (v / maxVal) * ph;
+
+  const lineD = data.map((d, i) =>
+    `${i === 0 ? "M" : "L"}${xi(i).toFixed(1)},${yi(d.total).toFixed(1)}`
+  ).join(" ");
+
+  const areaD = `${lineD} L${xi(DAYS - 1).toFixed(1)},${(PT + ph).toFixed(1)} L${xi(0).toFixed(1)},${(PT + ph).toFixed(1)} Z`;
+
+  const ySteps = [0, 0.33, 0.67, 1].map(f => maxVal * f);
+  const xLabels = days.map((d, i) => {
+    if (i !== 0 && i !== 14 && i !== DAYS - 1) return null;
+    const dt = new Date(d);
+    return { i, label: `${dt.getDate()} ${dt.toLocaleString("default", { month: "short" })}` };
+  }).filter(Boolean);
+
+  const chartTitle = chartMode === "freelancer" ? "Money Earned" : "Money Spent";
+
+  return (
+    <div className="rounded-2xl border border-black/10 p-5">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-black/35 mb-0.5">{chartTitle}</p>
+          <p className="text-xs text-black/35">Last 30 days · {defaultCurrency}</p>
+        </div>
+        {primaryRole === "Both" && (
+          <div className="flex gap-1 rounded-xl bg-black/5 p-1 shrink-0">
+            {[["freelancer", "Earned"], ["client", "Spent"]].map(([m, lbl]) => (
+              <button key={m}
+                onClick={() => { setChartMode(m); setSelected(null); }}
+                className={`rounded-lg px-3 py-1 text-xs font-medium transition ${chartMode === m ? "bg-white text-black shadow-sm" : "text-black/45 hover:text-black"}`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!hasData ? (
+        <div className="flex h-24 items-center justify-center">
+          <p className="text-sm text-black/30">No transactions in the last 30 days</p>
+        </div>
+      ) : (
+        <>
+          <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ overflow: "visible" }}>
+            <defs>
+              <linearGradient id="egGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#000" stopOpacity="0.1" />
+                <stop offset="100%" stopColor="#000" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+
+            {/* Y gridlines + labels */}
+            {ySteps.map((v, idx) => (
+              <g key={idx}>
+                <line x1={PL} y1={yi(v)} x2={W - PR} y2={yi(v)} stroke="rgba(0,0,0,0.07)" strokeWidth="1" />
+                <text x={PL - 6} y={yi(v) + 3.5} textAnchor="end" fontSize="9" fill="rgba(0,0,0,0.35)">
+                  {fmtAmt(v, sym)}
+                </text>
+              </g>
+            ))}
+
+            {/* X labels */}
+            {xLabels.map(({ i, label }) => (
+              <text key={i} x={xi(i)} y={H - 4} textAnchor="middle" fontSize="9" fill="rgba(0,0,0,0.3)">
+                {label}
+              </text>
+            ))}
+
+            {/* Area fill */}
+            <path d={areaD} fill="url(#egGrad)" />
+
+            {/* Line */}
+            <path d={lineD} fill="none" stroke="#000" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+
+            {/* Dots + value labels */}
+            {data.map((d, i) => d.total > 0 && (
+              <g key={d.day} onClick={() => setSelected(selected?.day === d.day ? null : d)} style={{ cursor: "pointer" }}>
+                {/* Total label above dot */}
+                <text
+                  x={xi(i)} y={yi(d.total) - 10}
+                  textAnchor="middle" fontSize="8.5" fontWeight="700" fill="rgba(0,0,0,0.72)"
+                >
+                  {fmtAmt(d.total, sym)}
+                </text>
+                {/* Selection ring */}
+                {selected?.day === d.day && (
+                  <circle cx={xi(i)} cy={yi(d.total)} r="8" fill="rgba(0,0,0,0.08)" />
+                )}
+                {/* Dot */}
+                <circle cx={xi(i)} cy={yi(d.total)} r="4.5" fill="#000" stroke="#fff" strokeWidth="1.5" />
+              </g>
+            ))}
+          </svg>
+
+          {/* Transaction detail panel */}
+          {selected && (
+            <div className="mt-3 rounded-xl border border-black/10 bg-black/[0.025] px-4 py-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-black">
+                  {new Date(selected.day).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
+                </p>
+                <button onClick={() => setSelected(null)} className="text-black/30 hover:text-black transition">
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="flex items-baseline justify-between gap-2 pb-2 border-b border-black/6">
+                <p className="text-xs text-black/40">Total {chartMode === "freelancer" ? "earned" : "spent"}</p>
+                <p className="text-sm font-bold text-black">{fmtAmt(selected.total, sym)}</p>
+              </div>
+              <div className="space-y-1.5">
+                {selected.txs.map((tx, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-black/60 truncate">{tx.title}</p>
+                    <p className="text-xs font-semibold text-black shrink-0">{tx.rawAmount}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function DashboardHome({ setActivePage }) {
   const { user } = useAuth();
   const { defaultCurrency, rates } = useCurrency();
@@ -106,6 +322,7 @@ export default function DashboardHome({ setActivePage }) {
   const [selectedPostedJob, setSelectedPostedJob] = useState(null);
   const [usdcLoading, setUsdcLoading] = useState(false);
   const [usdcResult, setUsdcResult] = useState(null);
+  const [completedGigs, setCompletedGigs] = useState([]);
 
   useEffect(() => {
     const check = () => {
@@ -135,6 +352,14 @@ export default function DashboardHome({ setActivePage }) {
       setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const ref = collection(db, "users", user.uid, "completedGigs");
+    return onSnapshot(ref, (snap) => {
+      setCompletedGigs(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+  }, [user]);
 
   useEffect(() => {
     if (!connected || !publicKey) { setSolBalance(null); return; }
@@ -292,6 +517,17 @@ export default function DashboardHome({ setActivePage }) {
         />
         <StatCard icon={<Award size={15} />} label="Gigs Completed" value="—" muted />
       </div>
+
+      {/* Earnings / Spending chart */}
+      {userProfile?.primaryRole && (
+        <EarningsChart
+          completedGigs={completedGigs}
+          clientJobs={myJobs}
+          primaryRole={userProfile.primaryRole}
+          defaultCurrency={defaultCurrency}
+          rates={rates}
+        />
+      )}
 
       {/* Posted jobs carousel */}
       {myJobs.length > 0 && (

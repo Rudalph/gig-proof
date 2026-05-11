@@ -874,20 +874,23 @@ export default function OpenJobs() {
                                 <input
                                   type="number"
                                   min="1"
-                                  max="99"
+                                  max="100"
                                   value={m.percentage}
                                   onChange={(e) => {
-                                    const val = Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1));
+                                    const raw = parseInt(e.target.value, 10);
+                                    const val = isNaN(raw) ? 1 : Math.min(100, Math.max(1, raw));
                                     setContactMilestoneSplit((prev) => prev.map((r, idx) => idx === i ? { ...r, percentage: val } : r));
                                   }}
-                                  className="w-14 rounded-lg border border-black/15 bg-white text-black px-2 py-1 text-xs text-center outline-none focus:border-black"
+                                  className="w-14 rounded-lg border border-black/15 bg-white text-black px-2 py-1 text-xs text-center outline-none focus:border-black [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                 />
                                 <span className="text-xs text-black/40">%</span>
                               </div>
                             </div>
                           ))}
                         </div>
-                        <p className="mt-1.5 text-xs text-black/40">Adjust percentages to counter-propose a different split</p>
+                        <p className="mt-1.5 text-xs text-black/40">
+                          Type any number per milestone — they must total exactly 100%
+                        </p>
                       </div>
                     )}
                     <div>

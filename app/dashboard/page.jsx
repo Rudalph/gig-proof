@@ -15,6 +15,7 @@ import DashboardHome from "../components/DashboardHome";
 import WorkHistory from "../components/WorkHistory";
 import Notifications from "../components/Notifications";
 import ActiveGigs from "../components/ActiveGigs";
+import DisputeWindow from "../components/DisputeWindow";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -59,6 +60,7 @@ export default function Dashboard() {
         {activePage === "Work History" && <WorkHistory setActivePage={setActivePage} setJobPrefill={setJobPrefill} />}
         {activePage === "Active Gigs" && <ActiveGigs />}
         {activePage === "Notifications" && <Notifications setActivePage={setActivePage} />}
+        {activePage === "Dispute Window" && <DisputeWindow />}
         {activePage === "Settings" && <Settings />}
         {activePage === "Profile" && <Profile />}
       </main>

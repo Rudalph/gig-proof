@@ -770,13 +770,11 @@ function timeAgo(ts) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function shortDate(isoStr) {
-  if (!isoStr) return "";
-  return new Date(isoStr).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+function shortDate(val) {
+  if (!val) return "";
+  const d = val?.toDate ? val.toDate() : new Date(val);
+  if (isNaN(d)) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 // ─── status badge ─────────────────────────────────────────────────────────────
@@ -941,12 +939,13 @@ function ProjectRow({ project, defaultCurrency, rates, onRepost }) {
 // ─── freelancer timeline entry ────────────────────────────────────────────────
 
 function TimelineEntry({ gig, uid, isLast }) {
-  const completedDate = gig.completedAt ? new Date(gig.completedAt) : null;
-  const month = completedDate
-    ? completedDate.toLocaleString("default", { month: "short" }).toUpperCase()
+  const completedDate = gig.completedAt
+    ? (gig.completedAt?.toDate ? gig.completedAt.toDate() : new Date(gig.completedAt))
     : null;
-  const day = completedDate ? completedDate.getDate() : null;
-  const year = completedDate ? completedDate.getFullYear() : null;
+  const validDate = completedDate && !isNaN(completedDate);
+  const month = validDate ? completedDate.toLocaleString("default", { month: "short" }).toUpperCase() : null;
+  const day   = validDate ? completedDate.getDate() : null;
+  const year  = validDate ? completedDate.getFullYear() : null;
 
   return (
     <div className="flex gap-5">
@@ -1122,16 +1121,38 @@ export default function WorkHistory({ setActivePage, setJobPrefill }) {
               <p className="mt-1 text-sm text-black/35">Head to Hire Talent to post your first project.</p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {projects.map((project) => (
-                <ProjectRow
-                  key={project.id}
-                  project={project}
-                  defaultCurrency={defaultCurrency}
-                  rates={rates}
-                  onRepost={handleRepost}
-                />
-              ))}
+            <div>
+              <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-black/35">
+                Posted · {projects.length} project{projects.length !== 1 ? "s" : ""}
+              </p>
+              {projects.map((project, idx) => {
+                const raw = project.createdAt?.toDate ? project.createdAt.toDate() : new Date(project.createdAt);
+                const validDate = raw && !isNaN(raw.getTime());
+                const month = validDate ? raw.toLocaleString("default", { month: "short" }).toUpperCase() : null;
+                const day   = validDate ? raw.getDate() : null;
+                const year  = validDate ? raw.getFullYear() : null;
+                const isLast = idx === projects.length - 1;
+                return (
+                  <div key={project.id} className="flex gap-5">
+                    <div className="flex flex-col items-center">
+                      <div className="flex flex-col items-center justify-center rounded-2xl bg-black px-3 py-2 text-white min-w-[52px]">
+                        {month && <span className="text-[10px] font-semibold tracking-widest opacity-60">{month}</span>}
+                        {day   && <span className="text-xl font-bold leading-none">{day}</span>}
+                        {year  && <span className="text-[10px] opacity-50 mt-0.5">{year}</span>}
+                      </div>
+                      {!isLast && <div className="mt-2 flex-1 w-px bg-black/10" style={{ minHeight: "32px" }} />}
+                    </div>
+                    <div className="mb-6 flex-1">
+                      <ProjectRow
+                        project={project}
+                        defaultCurrency={defaultCurrency}
+                        rates={rates}
+                        onRepost={handleRepost}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

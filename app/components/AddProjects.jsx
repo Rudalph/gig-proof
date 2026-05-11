@@ -156,11 +156,11 @@ function MilestoneModal({ open, initial, onSave, onClose }) {
                   <input
                     type="number"
                     min="1"
-                    max="99"
+                    max="100"
                     placeholder="0"
                     value={row.percentage}
-                    onChange={(e) => update(i, "percentage", e.target.value === "" ? "" : String(Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 0))))}
-                    className="w-20 rounded-xl border border-black/15 bg-white text-black px-3 py-2 text-sm text-center outline-none focus:border-black"
+                    onChange={(e) => update(i, "percentage", e.target.value === "" ? "" : String(Math.min(100, Math.max(1, parseInt(e.target.value, 10) || 0))))}
+                    className="w-20 rounded-xl border border-black/15 bg-white text-black px-3 py-2 text-sm text-center outline-none focus:border-black [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   <span className="text-sm text-black/50">% of total budget released</span>
                 </div>
