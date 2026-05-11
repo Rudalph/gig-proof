@@ -64,7 +64,9 @@
       "PowerShell(\\(Get-Item \"C:\\\\Users\\\\achal\\\\gig-proof\\\\escrow\\\\target\\\\deploy\\\\escrow.so\"\\).Length)",
       "PowerShell(solana program show 4routMSHngGLj5DbzUozx3Q9f86a5E46SsTDtj7S3Vca 2>&1)",
       "Bash(node -e \"require\\('@solana/spl-token'\\)\")",
-      "Bash(solana program *)"
+      "Bash(solana program *)",
+      "Bash(firebase deploy *)",
+      "Bash(waitfor /t 100 SomethingThatWillNeverHappen)"
     ],
     "additionalDirectories": [
       "c:\\Users\\achal\\.claude\\projects\\c--Users-achal-gig-proof\\memory"

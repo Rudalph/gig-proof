@@ -14,6 +14,7 @@ import {
   BriefcaseBusiness,
   Bell,
   Zap,
+  Scale,
 } from "lucide-react";
 
 import LogoutButton from "./Logout";
@@ -29,6 +30,7 @@ const navItems = [
   { label: "Work History", href: "#", icon: BriefcaseBusiness },
   { label: "Active Gigs", href: "#", icon: Zap },
   { label: "Notifications", href: "#", icon: Bell },
+  { label: "Dispute Window", href: "#", icon: Scale },
   { label: "Settings", href: "#", icon: Settings },
   { label: "Profile", href: "#", icon: CircleUserRound },
 ];
@@ -40,11 +42,17 @@ export default function Sidebar({ activePage, setActivePage }) {
   const { user } = useAuth();
   const [hasNewJobs, setHasNewJobs] = useState(false);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [openDisputes, setOpenDisputes] = useState(0);
 
   useEffect(() => {
     if (!user) return;
+    const ADMIN_TYPES = ["admin_message", "dispute_reverted"];
     const q = query(collection(db, "notifications"), where("toUid", "==", user.uid), where("read", "==", false));
-    return onSnapshot(q, (snap) => setUnreadNotifs(snap.size));
+    return onSnapshot(q, (snap) => {
+      const docs = snap.docs.map((d) => d.data());
+      setUnreadNotifs(docs.filter((d) => !ADMIN_TYPES.includes(d.type)).length);
+      setOpenDisputes(docs.filter((d) => d.type === "admin_message").length);
+    });
   }, [user]);
 
   useEffect(() => {
@@ -155,6 +163,11 @@ export default function Sidebar({ activePage, setActivePage }) {
                 {item.label === "Notifications" && unreadNotifs > 0 && activePage !== "Notifications" && (
                   <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
                     {unreadNotifs > 9 ? "9+" : unreadNotifs}
+                  </span>
+                )}
+                {item.label === "Dispute Window" && openDisputes > 0 && activePage !== "Dispute Window" && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white">
+                    {openDisputes > 9 ? "9+" : openDisputes}
                   </span>
                 )}
               </div>

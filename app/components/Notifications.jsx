@@ -94,6 +94,10 @@ function NotificationCard({ notif, processing, profileLoading, walletConnected, 
               <div className="flex items-center gap-1.5 text-sm font-semibold text-red-500">
                 <AlertTriangle size={15} /> Gig cancelled by client
               </div>
+            ) : notif.type === "admin_message" ? (
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-black">
+                <Shield size={15} className="text-black" /> Admin
+              </div>
             ) : (
               <div
                 className={`flex items-center gap-1.5 text-sm font-semibold ${
@@ -587,6 +591,25 @@ function NotificationCard({ notif, processing, profileLoading, walletConnected, 
         </div>
       )}
 
+      {/* admin_message body */}
+      {notif.type === "admin_message" && (
+        <div className="mt-2 space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-black/40">
+            Message from Admin
+          </p>
+          <div className="rounded-xl bg-black/[0.03] border border-black/10 px-4 py-3">
+            <p className="text-sm text-black/80 leading-relaxed whitespace-pre-wrap">
+              {notif.message}
+            </p>
+          </div>
+          {notif.projectTitle && (
+            <p className="text-xs text-black/40">
+              Regarding: <span className="font-semibold text-black/60">{notif.projectTitle}</span>
+            </p>
+          )}
+        </div>
+      )}
+
       {/* negotiation_counter body — shown to the other party */}
       {notif.type === "negotiation_counter" && !notif.withdrawn && (
         <div className="mt-2 space-y-3">
@@ -730,7 +753,8 @@ export default function Notifications({ setActivePage }) {
   }, [projectIdsKey]);
 
   // Group by projectId
-  const projectGroups = notifications.reduce((acc, notif) => {
+  const HIDDEN_TYPES = ["admin_message", "dispute_reverted"];
+  const projectGroups = notifications.filter((n) => !HIDDEN_TYPES.includes(n.type)).reduce((acc, notif) => {
     const pid = notif.projectId || "__no_project__";
     if (!acc[pid]) {
       acc[pid] = {
@@ -1484,12 +1508,12 @@ export default function Notifications({ setActivePage }) {
                       <div className="flex items-center gap-1 shrink-0">
                         <input
                           type="number"
-                          min="1"
+                          min="0"
                           max="100"
                           value={m.percentage}
                           onChange={(e) => {
                             const raw = parseInt(e.target.value, 10);
-                            const val = isNaN(raw) ? 1 : Math.min(100, Math.max(1, raw));
+                            const val = isNaN(raw) ? 0 : Math.min(100, Math.max(0, raw));
                             setCounterSplit((prev) => prev.map((r, idx) => idx === i ? { ...r, percentage: val } : r));
                           }}
                           className="w-14 rounded-lg border border-black/15 bg-white text-black px-2 py-1 text-xs text-center outline-none focus:border-black [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
